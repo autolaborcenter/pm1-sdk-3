@@ -1,0 +1,13 @@
+[package]
+name = "pm1-sdk-3"
+version = "0.1.0"
+edition = "2021"
+authors = ["YdrMaster <ydrml@hotmail.com>"]
+readme = "README.md"
+
+[dependencies]
+pm1-control-model = { path = "../pm1-control-model" }
+serial-port = { path = "../serial-port" }
+bit_field = "*"
+nalgebra = "*"
+lazy_static = "*"
