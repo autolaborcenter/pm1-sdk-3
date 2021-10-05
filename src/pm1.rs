@@ -1,9 +1,15 @@
 ﻿use self::node::*;
 use autocan::{Message, MessageBuffer};
-use pm1_control_model::{model::ChassisModel, motor::RUDDER, optimizer::Optimizer, Physical};
+use pm1_control_model::{
+    model::ChassisModel,
+    motor::{RUDDER, WHEEL},
+    optimizer::Optimizer,
+    Physical, Wheels,
+};
 use serial_port::{Port, SerialPort};
 use std::{
     collections::HashMap,
+    f32::consts::FRAC_PI_2,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -220,11 +226,20 @@ impl PM1 {
                     // 使用遥控器或主动询问
                     tcu::CURRENT_POSITION => {
                         if header.data_field() {
-                            let rudder =
-                                RUDDER.pluses_to_rad(
-                                    unsafe { msg.read().read_unchecked::<i16>() } as i32
-                                );
-                            self.current.rudder = rudder;
+                            {
+                                // 更新状态
+                                let rudder = RUDDER
+                                    .pluses_to_rad(
+                                        unsafe { msg.read().read_unchecked::<i16>() } as i32
+                                    );
+                                self.current.rudder = if rudder > FRAC_PI_2 {
+                                    FRAC_PI_2
+                                } else if rudder < -FRAC_PI_2 {
+                                    -FRAC_PI_2
+                                } else {
+                                    rudder
+                                };
+                            }
                             // 正在使用遥控器，跳过控制
                             if time > self.using_pad + Self::PAD_CONTROL_WINDOW {
                                 let (deadline, physical) = *self.target.lock().unwrap();
@@ -255,15 +270,45 @@ impl PM1 {
             },
         };
 
-        let mut reply = [0u8; 128]; // 126 = 14 * 9
+        let mut reply = [0u8; 14 * 4];
         let mut cursor = 0usize;
 
-        if let Some(target) = target {
+        if let Some(mut target) = target {
             if self.state_memory.iter().any(|(_, s)| *s == 0xff) {
                 // 解锁
+                let mut message = message(EVERY_TYPE, EVERY_INDEX, STOP, true);
+                unsafe { message.write().write_unchecked(0xff as u8) };
+                reply[..14].copy_from_slice(message.as_slice());
                 cursor += 14;
             }
             // 控制
+            if target.rudder.is_nan() {
+                target.rudder = self.current.rudder;
+            }
+            target.speed = self.optimizer.optimize_speed(target, self.current);
+            self.current.speed = target.speed;
+            let Wheels { left: l, right: r } = self.model.physical_to_wheels(self.current);
+            {
+                let l = WHEEL.rad_to_pulses(l);
+                let mut message = message(ecu::TYPE, 0, ecu::TARGET_SPEED, true);
+                unsafe { message.write().write_unchecked(l) };
+                reply[cursor..][..14].copy_from_slice(message.as_slice());
+                cursor += 14;
+            }
+            {
+                let r = WHEEL.rad_to_pulses(r);
+                let mut message = message(ecu::TYPE, 1, ecu::TARGET_SPEED, true);
+                unsafe { message.write().write_unchecked(r) };
+                reply[cursor..][..14].copy_from_slice(message.as_slice());
+                cursor += 14;
+            }
+            {
+                let r = RUDDER.rad_to_pulses(target.rudder) as i16;
+                let mut message = message(tcu::TYPE, 0, tcu::TARGET_POSITION, true);
+                unsafe { message.write().write_unchecked(r) };
+                reply[cursor..][..14].copy_from_slice(message.as_slice());
+                cursor += 14;
+            }
         }
 
         if cursor > 0 {
