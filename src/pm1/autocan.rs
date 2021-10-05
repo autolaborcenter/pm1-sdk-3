@@ -105,7 +105,7 @@ impl Message {
         );
         let mut result = Self([0u8; 14]);
         let mut i = 0;
-        while i < 5 {
+        while i < header.0.len() {
             result.0[i] = header.0[i];
             i += 1;
         }
