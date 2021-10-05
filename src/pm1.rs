@@ -28,7 +28,6 @@ pub struct PM1 {
     target: Arc<Mutex<(Instant, Physical)>>,
     current: Physical,
 
-    control_period: Duration,
     model: ChassisModel,
     optimizer: Optimizer,
 }
@@ -73,7 +72,6 @@ pub fn pm1(port: Port) -> (PM1QuerySender, PM1) {
             current: Physical::RELEASED,
 
             target: Arc::new(Mutex::new((now, Physical::RELEASED))),
-            control_period,
             model: Default::default(),
             optimizer: Optimizer::new(0.5, 1.2, control_period),
         },
@@ -84,13 +82,15 @@ struct Queries([u8; 30]);
 
 impl Queries {
     pub fn new() -> Self {
-        let mut messages = [
+        const MSG: [Message; 5] = [
             message(tcu::TYPE, EVERY_INDEX, tcu::CURRENT_POSITION, false),
             message(ecu::TYPE, EVERY_INDEX, ecu::CURRENT_POSITION, false),
             message(EVERY_TYPE, EVERY_INDEX, STATE, false),
             message(vcu::TYPE, EVERY_INDEX, vcu::POWER_SWITCH, false),
             message(vcu::TYPE, EVERY_INDEX, vcu::BATTERY_PERCENT, false),
         ];
+
+        let mut messages = MSG;
         let mut buffer = [0u8; 30];
         for i in 0..messages.len() {
             messages[i].write();
@@ -344,7 +344,7 @@ impl Iterator for PM1 {
 }
 
 #[inline]
-fn message(node_type: u8, node_index: u8, msg_type: u8, data_field: bool) -> Message {
+const fn message(node_type: u8, node_index: u8, msg_type: u8, data_field: bool) -> Message {
     Message::new(0, data_field, 0, node_type, node_index, msg_type)
 }
 

@@ -8,6 +8,5 @@ readme = "README.md"
 [dependencies]
 pm1-control-model = { path = "../pm1-control-model" }
 serial-port = { path = "../serial-port" }
-bit_field = "*"
 nalgebra = "*"
 lazy_static = "*"

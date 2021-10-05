@@ -92,7 +92,7 @@ impl<const LEN: usize> Iterator for MessageBuffer<LEN> {
 }
 
 impl Message {
-    pub fn new(
+    pub const fn new(
         network: u8,
         data_field: bool,
         proprity: u8,
@@ -100,13 +100,16 @@ impl Message {
         node_index: u8,
         msg_type: u8,
     ) -> Self {
-        let mut buffer = [0u8; 14];
-        unsafe {
-            *(buffer.as_mut_ptr() as *mut Header) = Header::new(
-                network, data_field, proprity, node_type, node_index, msg_type,
-            )
-        };
-        Self(buffer)
+        let header = Header::new(
+            network, data_field, proprity, node_type, node_index, msg_type,
+        );
+        let mut result = Self([0u8; 14]);
+        let mut i = 0;
+        while i < 5 {
+            result.0[i] = header.0[i];
+            i += 1;
+        }
+        result
     }
 
     pub unsafe fn header<'a>(&'a self) -> &'a Header {
@@ -133,6 +136,17 @@ impl Message {
             msg: self,
             cursor: 5,
         }
+    }
+}
+
+impl Display for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "MSG: {} | {:?}",
+            unsafe { self.header() },
+            self.as_slice()
+        )
     }
 }
 
@@ -187,25 +201,4 @@ fn crc_cauculate(buffer: &[u8]) -> u8 {
     buffer
         .iter()
         .fold(0u8, |sum, item| CRC8[(sum ^ *item) as usize])
-}
-
-impl Display for Message {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let header = unsafe { self.header() };
-        write!(
-            f,
-            "Message: {} | {}:{:02X}[{:1X}]:{:02X} | {:?} | {:?}",
-            header.proprity(),
-            header.network(),
-            header.node_type(),
-            header.node_index(),
-            header.msg_type(),
-            if header.data_field() {
-                &self.0[5..13]
-            } else {
-                &[0u8; 0]
-            },
-            self.as_slice()
-        )
-    }
 }
