@@ -19,6 +19,11 @@ pub struct MessageWriter<'a> {
     cursor: usize,
 }
 
+pub struct MessageReader<'a> {
+    msg: &'a Message,
+    cursor: usize,
+}
+
 impl<const LEN: usize> Default for MessageBuffer<LEN> {
     fn default() -> Self {
         Self {
@@ -108,10 +113,6 @@ impl Message {
         (self.0.as_ptr() as *const Header).as_ref().unwrap()
     }
 
-    pub unsafe fn data<'a>(&'a self) -> &'a [u8] {
-        &self.0[5..13]
-    }
-
     pub fn as_slice<'a>(&'a self) -> &'a [u8] {
         if unsafe { self.header() }.data_field() {
             &self.0
@@ -125,6 +126,24 @@ impl Message {
             msg: self,
             cursor: 5,
         }
+    }
+
+    pub fn read<'a>(&'a self) -> MessageReader<'a> {
+        MessageReader {
+            msg: self,
+            cursor: 5,
+        }
+    }
+}
+
+impl MessageReader<'_> {
+    pub unsafe fn read_unchecked<T: Copy>(&mut self) -> T {
+        let slice = &self.msg.0[self.cursor..];
+        let mut t = *(slice.as_ptr() as *const T);
+        let len = std::mem::size_of_val(&t);
+        std::slice::from_raw_parts_mut(&mut t as *mut T as *mut u8, len).reverse();
+        self.cursor += len;
+        t
     }
 }
 
@@ -175,17 +194,18 @@ impl Display for Message {
         let header = unsafe { self.header() };
         write!(
             f,
-            "Message: {} | {}:{:02X}[{:1X}]:{:02X} | {:?}",
+            "Message: {} | {}:{:02X}[{:1X}]:{:02X} | {:?} | {:?}",
             header.proprity(),
             header.network(),
             header.node_type(),
             header.node_index(),
             header.msg_type(),
             if header.data_field() {
-                unsafe { self.data() }
+                &self.0[5..13]
             } else {
                 &[0u8; 0]
-            }
+            },
+            self.as_slice()
         )
     }
 }

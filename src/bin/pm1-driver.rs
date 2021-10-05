@@ -28,6 +28,8 @@ fn main() {
     });
 
     for chassis in chassis {
-        for message in chassis {}
+        for message in chassis {
+            println!("{:?}", message);
+        }
     }
 }

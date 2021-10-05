@@ -1,5 +1,6 @@
-﻿use autocan::{Message, MessageBuffer};
-use pm1_control_model::{model::ChassisModel, optimizer::Optimizer, Physical};
+﻿use self::node::*;
+use autocan::{Message, MessageBuffer};
+use pm1_control_model::{model::ChassisModel, motor::RUDDER, optimizer::Optimizer, Physical};
 use serial_port::{Port, SerialPort};
 use std::{
     collections::HashMap,
@@ -7,19 +8,19 @@ use std::{
     time::{Duration, Instant},
 };
 
-use self::node::*;
-
 pub mod autocan;
 
 pub struct PM1 {
     port: Arc<Port>,
     buffer: MessageBuffer<32>,
 
+    using_pad: Instant,
     battery_percent: u8,
     power_switch: bool,
     state_memory: HashMap<(u8, u8), u8>,
 
     target: Arc<Mutex<(Instant, Physical)>>,
+    current: Physical,
 
     control_period: Duration,
     model: ChassisModel,
@@ -34,6 +35,7 @@ pub struct PM1QuerySender {
     index: usize,
 }
 
+#[derive(Debug)]
 pub enum PM1Status {
     Battery(u8),
     Status(Physical),
@@ -58,9 +60,11 @@ pub fn pm1(port: Port) -> (PM1QuerySender, PM1) {
             port,
             buffer: Default::default(),
 
+            using_pad: now,
             battery_percent: 0,
             power_switch: false,
             state_memory: HashMap::new(),
+            current: Physical::RELEASED,
 
             target: Arc::new(Mutex::new((now, Physical::RELEASED))),
             control_period,
@@ -74,17 +78,17 @@ struct Queries([u8; 30]);
 
 impl Queries {
     pub fn new() -> Self {
+        let mut messages = [
+            message(tcu::TYPE, EVERY_INDEX, tcu::CURRENT_POSITION, false),
+            message(ecu::TYPE, EVERY_INDEX, ecu::CURRENT_POSITION, false),
+            message(EVERY_TYPE, EVERY_INDEX, STATE, false),
+            message(vcu::TYPE, EVERY_INDEX, vcu::POWER_SWITCH, false),
+            message(vcu::TYPE, EVERY_INDEX, vcu::BATTERY_PERCENT, false),
+        ];
         let mut buffer = [0u8; 30];
-        unsafe {
-            let buffer = std::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut Message, 5);
-            buffer[0] = message(tcu::TYPE, EVERY_INDEX, tcu::CURRENT_POSITION, false);
-            buffer[1] = message(ecu::TYPE, EVERY_INDEX, ecu::CURRENT_POSITION, false);
-            buffer[2] = message(EVERY_TYPE, EVERY_INDEX, STATE, false);
-            buffer[3] = message(vcu::TYPE, EVERY_INDEX, vcu::POWER_SWITCH, false);
-            buffer[4] = message(vcu::TYPE, EVERY_INDEX, vcu::BATTERY_PERCENT, false);
-            for item in buffer {
-                item.write();
-            }
+        for i in 0..messages.len() {
+            messages[i].write();
+            buffer[i * 6..][..6].copy_from_slice(&messages[i].as_slice());
         }
         Self(buffer)
     }
@@ -97,7 +101,7 @@ lazy_static! {
 impl PM1QuerySender {
     fn send_len(&self, len: usize) {
         if len > 0 {
-            self.port.write(&QUERIES.0[..len * 6]);
+            self.port.write(&QUERIES.0[..6 * len]);
         }
     }
 
@@ -125,31 +129,36 @@ impl PM1QuerySender {
 }
 
 impl PM1 {
+    const TARGET_MEMORY_WINDOW: Duration = Duration::from_millis(200); // 超过这个窗口，则将目标状态悬空
+    const PAD_CONTROL_WINDOW: Duration = Duration::from_millis(200); // 超过这个窗口，则可接管控制
+
     pub fn set_target(&self, target: Physical) {
-        *self.target.lock().unwrap() = (Instant::now(), target);
+        *self.target.lock().unwrap() = (Instant::now() + Self::TARGET_MEMORY_WINDOW, target);
     }
 
-    fn receive(&mut self, msg: Message) -> Option<PM1Status> {
+    fn receive(&mut self, time: Instant, msg: Message) -> Option<PM1Status> {
         let header = unsafe { msg.header() };
         let _type = (header.node_type(), header.msg_type());
 
-        println!("{}", msg);
+        let mut target: Option<Physical> = None;
 
-        let mut reply = [0u8; 128]; // 126 = 14 * 9
-        let mut cursor = 0usize;
-
-        let mut result = match _type.1 {
+        let result = match _type.1 {
             // 底盘发送了软件锁定或解锁
-            // 目前不知道这有什么意义
-            // 也许这个指令可以将上位机也锁定
-            STOP => None,
+            // 这意味着通过遥控器或急停按钮进行了操作
+            STOP => {
+                // 暂时抑制控制
+                self.using_pad = time;
+                // 清除之前设置的目标状态，如同已经超时
+                *self.target.lock().unwrap() = (time, Physical::RELEASED);
+                None
+            }
             // 节点状态
             // 多种触发条件
             STATE => {
-                self.state_memory.insert(
-                    (header.node_type(), header.node_index()),
-                    unsafe { msg.data() }[0],
-                );
+                self.state_memory
+                    .insert((header.node_type(), header.node_index()), unsafe {
+                        msg.read().read_unchecked()
+                    });
                 None
             }
             // 不需要解析的跨节点协议
@@ -161,16 +170,21 @@ impl PM1 {
                     // 电池百分比
                     // 主动询问
                     vcu::BATTERY_PERCENT => {
-                        let battery_percent = unsafe { msg.data() }[0];
-                        self.battery_percent = battery_percent;
-                        Some(PM1Status::Battery(self.battery_percent))
+                        if header.data_field() {
+                            let battery_percent = unsafe { msg.read().read_unchecked() };
+                            self.battery_percent = battery_percent;
+                            Some(PM1Status::Battery(self.battery_percent))
+                        } else {
+                            None
+                        }
                     }
                     // 急停开关
                     // 主动询问
                     vcu::POWER_SWITCH => {
-                        let power_switch = unsafe { msg.data() }[0];
-                        self.power_switch = power_switch > 0;
-                        println!("{}", power_switch);
+                        if header.data_field() {
+                            let power_switch: u8 = unsafe { msg.read().read_unchecked() };
+                            self.power_switch = power_switch > 0;
+                        }
                         None
                     }
                     // 其他，不需要解析
@@ -180,10 +194,17 @@ impl PM1 {
                 ecu::TYPE => match _type.1 {
                     // 目标速度
                     // 接收到这个意味着正在使用遥控器
-                    ecu::TARGET_SPEED => None,
+                    ecu::TARGET_SPEED => {
+                        self.using_pad = time;
+                        // TODO 在这里也可以接收，以同步本地状态
+                        None
+                    }
                     // 当前位置
                     // 主动询问
-                    ecu::CURRENT_POSITION => None,
+                    ecu::CURRENT_POSITION => {
+                        // TODO 更新里程计
+                        None
+                    }
                     // 其他，不需要解析
                     _ => None,
                 },
@@ -191,10 +212,41 @@ impl PM1 {
                 tcu::TYPE => match _type.1 {
                     // 目标角度
                     // 接收到这个意味着正在使用遥控器
-                    tcu::TARGET_POSITION => None,
+                    tcu::TARGET_POSITION => {
+                        self.using_pad = time;
+                        None
+                    }
                     // 当前角度
                     // 使用遥控器或主动询问
-                    tcu::CURRENT_POSITION => None,
+                    tcu::CURRENT_POSITION => {
+                        if header.data_field() {
+                            let rudder =
+                                RUDDER.pluses_to_rad(
+                                    unsafe { msg.read().read_unchecked::<i16>() } as i32
+                                );
+                            self.current.rudder = rudder;
+                            // 正在使用遥控器，跳过控制
+                            if time > self.using_pad + Self::PAD_CONTROL_WINDOW {
+                                let (deadline, physical) = *self.target.lock().unwrap();
+                                target = if time >= deadline {
+                                    // 距离上次接收已经超时
+                                    if self.current.speed == 0.0 {
+                                        None
+                                    } else {
+                                        Some(Physical::RELEASED)
+                                    }
+                                } else {
+                                    Some(physical)
+                                };
+                            }
+                            Some(PM1Status::Status(self.current))
+                        } else {
+                            // VCU 询问 TCU
+                            // 接收到这个意味着正在使用遥控器
+                            self.using_pad = time;
+                            None
+                        }
+                    }
                     // 其他，不需要解析
                     _ => None,
                 },
@@ -202,6 +254,17 @@ impl PM1 {
                 _ => None,
             },
         };
+
+        let mut reply = [0u8; 128]; // 126 = 14 * 9
+        let mut cursor = 0usize;
+
+        if let Some(target) = target {
+            if self.state_memory.iter().any(|(_, s)| *s == 0xff) {
+                // 解锁
+                cursor += 14;
+            }
+            // 控制
+        }
 
         if cursor > 0 {
             self.port.write(&reply[..cursor]);
@@ -215,14 +278,18 @@ impl Iterator for PM1 {
     type Item = PM1Status;
 
     fn next(&mut self) -> Option<Self::Item> {
+        let mut time = Instant::now();
         loop {
             if let Some(msg) = self.buffer.next() {
-                if let Some(status) = self.receive(msg) {
+                if let Some(status) = self.receive(time, msg) {
                     return Some(status);
                 }
             } else {
                 match self.port.read(self.buffer.as_buf()) {
-                    Some(n) => self.buffer.notify_received(n),
+                    Some(n) => {
+                        time = Instant::now();
+                        self.buffer.notify_received(n);
+                    }
                     // None => return None,
                     None => {}
                 };
@@ -233,7 +300,7 @@ impl Iterator for PM1 {
 
 #[inline]
 fn message(node_type: u8, node_index: u8, msg_type: u8, data_field: bool) -> Message {
-    Message::new(0, data_field, 3, node_type, node_index, msg_type)
+    Message::new(0, data_field, 0, node_type, node_index, msg_type)
 }
 
 pub mod node {
