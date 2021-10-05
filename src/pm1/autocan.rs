@@ -1,7 +1,7 @@
 ﻿mod define;
 
 use define::Header;
-use std::{fmt::Display, io::Write};
+use std::fmt::Display;
 
 /// 存放编码消息的缓冲区
 ///
@@ -175,13 +175,17 @@ impl Display for Message {
         let header = unsafe { self.header() };
         write!(
             f,
-            "Message: {} | {}:{:#02X}[{}]:{} | {}",
+            "Message: {} | {}:{:02X}[{:1X}]:{:02X} | {:?}",
             header.proprity(),
             header.network(),
             header.node_type(),
             header.node_index(),
             header.msg_type(),
-            header.data_field()
+            if header.data_field() {
+                unsafe { self.data() }
+            } else {
+                &[0u8; 0]
+            }
         )
     }
 }

@@ -1,5 +1,6 @@
 ﻿use pm1_sdk_3::pm1::*;
 use serial_port::{Port, SerialPort};
+use std::{thread, time::Duration};
 
 fn main() {
     let mut senders = Vec::<PM1QuerySender>::new();
@@ -18,6 +19,13 @@ fn main() {
             senders.push(sender);
             chassis.push(pm1);
         });
+
+    let _ = thread::spawn(move || loop {
+        for sender in &mut senders {
+            sender.send();
+        }
+        thread::sleep(Duration::from_millis(40));
+    });
 
     for chassis in chassis {
         for message in chassis {}
