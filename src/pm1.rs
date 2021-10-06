@@ -21,6 +21,13 @@ const TARGET_MEMORY_TIMEOUT: Duration = Duration::from_millis(200); // 超时则
 const PAD_CONTROL_TIMEOUT: Duration = Duration::from_millis(200); // 在此保护时间内不进行控制
 const MESSAGE_PARSE_TIMEOUT: Duration = Duration::from_millis(250); // 超时认为底盘已断开，立即退出
 
+/// 保存底盘状态的结构体。
+///
+/// 通过 `PM1` 的一个实例，可以完成以下三项功能：
+///
+/// - 接收和解析串口协议
+/// - 缓存并随时读取底盘状态
+/// - 控制底盘移动
 pub struct PM1 {
     port: Arc<Port>,
     buffer: MessageBuffer<32>,
