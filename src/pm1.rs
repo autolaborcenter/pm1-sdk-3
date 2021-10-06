@@ -16,6 +16,11 @@ use std::{
 
 pub mod autocan;
 
+pub const CONTROL_PERIOD: Duration = Duration::from_millis(40); // 默认的控制周期
+const TARGET_MEMORY_TIMEOUT: Duration = Duration::from_millis(200); // 超时则将目标改为停止
+const PAD_CONTROL_TIMEOUT: Duration = Duration::from_millis(200); // 在此保护时间内不进行控制
+const MESSAGE_PARSE_TIMEOUT: Duration = Duration::from_millis(250); // 超时认为底盘已断开，立即退出
+
 pub struct PM1 {
     port: Arc<Port>,
     buffer: MessageBuffer<32>,
@@ -39,7 +44,6 @@ pub struct PM1Status {
 pub struct PM1QuerySender {
     port: Weak<Port>,
 
-    control_period: Duration,
     next: Instant,
     index: usize,
 }
@@ -59,13 +63,11 @@ pub enum PM1Event {
 }
 
 pub fn pm1(port: Port) -> (PM1QuerySender, PM1) {
-    let control_period = Duration::from_millis(40);
     let now = Instant::now();
     let port = Arc::new(port);
     let sender = PM1QuerySender {
         port: Arc::downgrade(&port),
 
-        control_period,
         next: now,
         index: 0,
     };
@@ -86,7 +88,7 @@ pub fn pm1(port: Port) -> (PM1QuerySender, PM1) {
             target: Arc::new(Mutex::new((now, Physical::RELEASED))),
 
             model: Default::default(),
-            optimizer: Optimizer::new(0.5, 1.2, control_period),
+            optimizer: Optimizer::new(0.5, 1.2, CONTROL_PERIOD),
         },
     )
 }
@@ -133,7 +135,7 @@ impl PM1QuerySender {
         let now = Instant::now();
         let mut len = 0usize;
         while self.next < now {
-            self.next += self.control_period;
+            self.next += CONTROL_PERIOD;
             self.index += 1;
             if len == 5 {
             } else if self.index % 250 == 0 {
@@ -151,9 +153,6 @@ impl PM1QuerySender {
         self.send_len(len)
     }
 }
-
-const TARGET_MEMORY_WINDOW: Duration = Duration::from_millis(200); // 超过这个窗口，则将目标状态悬空
-const PAD_CONTROL_WINDOW: Duration = Duration::from_millis(200); // 超过这个窗口，则可接管控制
 
 impl PM1 {
     pub fn get_interface(&self) -> PM1Interface {
@@ -202,7 +201,7 @@ impl PM1 {
             rudder
         };
         // 正在使用遥控器，跳过控制
-        let target = if time > self.using_pad + PAD_CONTROL_WINDOW {
+        let target = if time > self.using_pad + PAD_CONTROL_TIMEOUT {
             let mut guard = self.target.lock().unwrap();
             let (deadline, physical) = *guard;
             if time >= deadline {
@@ -367,12 +366,18 @@ impl Iterator for PM1 {
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut time = Instant::now();
+        let deadline = time + MESSAGE_PARSE_TIMEOUT;
         loop {
             if let Some(msg) = self.buffer.next() {
+                // 成功从缓存中消费
                 if let Some(status) = self.receive(time, msg) {
                     return Some(status);
                 }
+            } else if time > deadline {
+                // 解析已超时
+                return None;
             } else {
+                // 重新接收
                 match self.port.read(self.buffer.as_buf()) {
                     Some(n) => {
                         if n == 0 {
@@ -396,7 +401,7 @@ impl PM1Interface {
 
     pub fn set_target(&self, target: Physical) -> bool {
         if let Some(mutex) = self.target.upgrade() {
-            *mutex.lock().unwrap() = (Instant::now() + TARGET_MEMORY_WINDOW, target);
+            *mutex.lock().unwrap() = (Instant::now() + TARGET_MEMORY_TIMEOUT, target);
             true
         } else {
             false

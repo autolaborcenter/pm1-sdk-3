@@ -97,7 +97,6 @@ impl Timer {
 }
 
 fn send_on_single_thread(mut senders: Vec<Option<Box<PM1QuerySender>>>) -> JoinHandle<()> {
-    const PERIOD: Duration = Duration::from_millis(40);
     thread::spawn(move || {
         let mut timer = Timer(Instant::now());
         loop {
@@ -120,12 +119,12 @@ fn send_on_single_thread(mut senders: Vec<Option<Box<PM1QuerySender>>>) -> JoinH
             match count {
                 0 => return,
                 1 => break,
-                _ => timer.wait_per(PERIOD),
+                _ => timer.wait_per(pm1::CONTROL_PERIOD),
             }
         }
         let mut sender = std::mem::replace(&mut senders[0], None).unwrap();
         while sender.send() {
-            timer.wait_per(PERIOD);
+            timer.wait_per(pm1::CONTROL_PERIOD);
         }
     })
 }
