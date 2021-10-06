@@ -13,15 +13,15 @@ pub mod pm1;
 
 pub struct PM1Threads;
 
-// #[macro_export]
-// macro_rules! pm1_threads {
-//     ($block:expr) => {
-//         PM1Threads::open_all($block)
-//     };
-//     ($($x:expr)+; $block:expr ) => {
-//         PM1Threads::open_some(&[$(String::from($x),)*], $block)
-//     };
-// }
+#[macro_export]
+macro_rules! find_pm1 {
+    () => {
+        pm1_sdk_3::PM1Threads::open_all()
+    };
+    ($($x:expr)+) => {
+        pm1_sdk_3::PM1Threads::open_some(&[$(String::from($x),)*])
+    };
+}
 
 impl PM1Threads {
     /// 打开一些串口
@@ -101,6 +101,7 @@ fn send_on_single_thread(mut senders: Vec<Option<Box<PM1QuerySender>>>) -> JoinH
     thread::spawn(move || {
         let mut timer = Timer(Instant::now());
         loop {
+            // 等待仅剩一个
             let count = senders
                 .iter_mut()
                 .filter_map(|o| {
@@ -119,14 +120,12 @@ fn send_on_single_thread(mut senders: Vec<Option<Box<PM1QuerySender>>>) -> JoinH
             match count {
                 0 => return,
                 1 => break,
-                _ => {}
+                _ => timer.wait_per(PERIOD),
             }
-            timer.wait_per(PERIOD);
         }
-        if let Some(mut sender) = std::mem::replace(&mut senders[0], None) {
-            while sender.send() {
-                timer.wait_per(PERIOD);
-            }
+        let mut sender = std::mem::replace(&mut senders[0], None).unwrap();
+        while sender.send() {
+            timer.wait_per(PERIOD);
         }
     })
 }

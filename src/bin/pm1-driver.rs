@@ -1,5 +1,7 @@
-﻿fn main() {
-    if let Some(chassis) = pm1_sdk_3::PM1Threads::open_all() {
+﻿use pm1_sdk_3::find_pm1;
+
+fn main() {
+    if let Some(chassis) = find_pm1!() {
         for event in chassis {
             println!("{:?}", event);
         }
