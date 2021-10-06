@@ -150,6 +150,11 @@ impl PM1 {
         *self.target.lock().unwrap() = (Instant::now() + Self::TARGET_MEMORY_WINDOW, target);
     }
 
+    fn detect_control_pad(&mut self, time: Instant) {
+        self.using_pad = time;
+        self.current.speed = 0.0;
+    }
+
     fn update_battery_percent(&mut self, battery_percent: u8) -> Option<PM1Status> {
         if battery_percent != self.battery_percent {
             self.battery_percent = battery_percent;
@@ -159,7 +164,8 @@ impl PM1 {
         }
     }
 
-    fn update_power_switch(&mut self, power_switch: bool) -> Option<PM1Status> {
+    fn update_power_switch(&mut self, power_switch: u8) -> Option<PM1Status> {
+        let power_switch = power_switch != 0;
         if power_switch != self.power_switch {
             self.power_switch = power_switch;
             Some(PM1Status::PowerSwitch(power_switch))
@@ -168,7 +174,8 @@ impl PM1 {
         }
     }
 
-    fn update_rudder(&mut self, time: Instant, rudder: f32) -> Option<PM1Status> {
+    fn update_rudder(&mut self, time: Instant, rudder: i16) -> Option<PM1Status> {
+        let rudder = RUDDER.pluses_to_rad(rudder.into());
         let mut current = self.current;
         // 更新状态
         current.rudder = if rudder > FRAC_PI_2 {
@@ -255,10 +262,7 @@ impl PM1 {
             // 底盘发送了软件锁定或解锁
             // 这意味着通过遥控器或急停按钮进行了操作
             STOP => {
-                // 暂时抑制控制
-                self.using_pad = time;
-                // 清除之前设置的目标状态，如同已经超时
-                *self.target.lock().unwrap() = (time, Physical::RELEASED);
+                self.detect_control_pad(time);
                 None
             }
             // 节点状态
@@ -278,8 +282,7 @@ impl PM1 {
                     // 主动询问
                     vcu::BATTERY_PERCENT => {
                         if data {
-                            let value: u8 = unsafe { msg.read().read_unchecked() };
-                            self.update_battery_percent(value)
+                            self.update_battery_percent(unsafe { msg.read().read_unchecked() })
                         } else {
                             None
                         }
@@ -288,8 +291,7 @@ impl PM1 {
                     // 主动询问
                     vcu::POWER_SWITCH => {
                         if data {
-                            let value: u8 = unsafe { msg.read().read_unchecked() };
-                            self.update_power_switch(value != 0)
+                            self.update_power_switch(unsafe { msg.read().read_unchecked() })
                         } else {
                             None
                         }
@@ -302,7 +304,7 @@ impl PM1 {
                     // 目标速度
                     // 接收到这个意味着正在使用遥控器
                     ecu::TARGET_SPEED => {
-                        self.using_pad = time;
+                        self.detect_control_pad(time);
                         // TODO 在这里也可以接收，以同步本地状态
                         None
                     }
@@ -320,19 +322,17 @@ impl PM1 {
                     // 目标角度
                     // 接收到这个意味着正在使用遥控器
                     tcu::TARGET_POSITION => {
-                        self.using_pad = time;
+                        self.detect_control_pad(time);
                         None
                     }
                     // 当前角度
                     // 使用遥控器或主动询问
                     tcu::CURRENT_POSITION => {
                         if data {
-                            let value: i16 = unsafe { msg.read().read_unchecked() };
-                            self.update_rudder(time, RUDDER.pluses_to_rad(value.into()))
+                            self.update_rudder(time, unsafe { msg.read().read_unchecked() })
                         } else {
                             // VCU 询问 TCU
-                            // 接收到这个意味着正在使用遥控器
-                            self.using_pad = time;
+                            self.detect_control_pad(time);
                             None
                         }
                     }
