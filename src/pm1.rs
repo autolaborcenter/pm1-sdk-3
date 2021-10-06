@@ -10,7 +10,7 @@ use serial_port::{Port, SerialPort};
 use std::{
     collections::HashMap,
     f32::consts::FRAC_PI_2,
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Mutex, RwLock, Weak},
     time::{Duration, Instant},
 };
 
@@ -21,15 +21,19 @@ pub struct PM1 {
     buffer: MessageBuffer<32>,
 
     using_pad: Instant,
-    battery_percent: u8,
-    power_switch: bool,
     state_memory: HashMap<(u8, u8), u8>,
-
+    status: Arc<RwLock<PM1Status>>,
     target: Arc<Mutex<(Instant, Physical)>>,
-    current: Physical,
 
     model: ChassisModel,
     optimizer: Optimizer,
+}
+
+#[derive(Clone, Copy)]
+pub struct PM1Status {
+    battery_percent: u8,
+    power_switch: bool,
+    physical: Physical,
 }
 
 pub struct PM1QuerySender {
@@ -40,10 +44,14 @@ pub struct PM1QuerySender {
     index: usize,
 }
 
-pub struct PM1Interface {}
+#[derive(Clone)]
+pub struct PM1Interface {
+    status: Arc<RwLock<PM1Status>>,
+    target: Weak<Mutex<(Instant, Physical)>>,
+}
 
 #[derive(Debug)]
-pub enum PM1Status {
+pub enum PM1Event {
     Battery(u8),
     PowerSwitch(bool),
     Status(Physical),
@@ -69,12 +77,14 @@ pub fn pm1(port: Port) -> (PM1QuerySender, PM1) {
             buffer: Default::default(),
 
             using_pad: now,
-            battery_percent: 0,
-            power_switch: false,
             state_memory: HashMap::new(),
-            current: Physical::RELEASED,
-
+            status: Arc::new(RwLock::new(PM1Status {
+                battery_percent: 0,
+                power_switch: false,
+                physical: Physical::RELEASED,
+            })),
             target: Arc::new(Mutex::new((now, Physical::RELEASED))),
+
             model: Default::default(),
             optimizer: Optimizer::new(0.5, 1.2, control_period),
         },
@@ -142,41 +152,47 @@ impl PM1QuerySender {
     }
 }
 
-impl PM1 {
-    const TARGET_MEMORY_WINDOW: Duration = Duration::from_millis(200); // 超过这个窗口，则将目标状态悬空
-    const PAD_CONTROL_WINDOW: Duration = Duration::from_millis(200); // 超过这个窗口，则可接管控制
+const TARGET_MEMORY_WINDOW: Duration = Duration::from_millis(200); // 超过这个窗口，则将目标状态悬空
+const PAD_CONTROL_WINDOW: Duration = Duration::from_millis(200); // 超过这个窗口，则可接管控制
 
-    pub fn set_target(&self, target: Physical) {
-        *self.target.lock().unwrap() = (Instant::now() + Self::TARGET_MEMORY_WINDOW, target);
+impl PM1 {
+    pub fn get_interface(&self) -> PM1Interface {
+        PM1Interface {
+            status: self.status.clone(),
+            target: Arc::downgrade(&self.target),
+        }
     }
 
     fn detect_control_pad(&mut self, time: Instant) {
         self.using_pad = time;
-        self.current.speed = 0.0;
+        self.status.write().unwrap().physical.speed = 0.0;
     }
 
-    fn update_battery_percent(&mut self, battery_percent: u8) -> Option<PM1Status> {
-        if battery_percent != self.battery_percent {
-            self.battery_percent = battery_percent;
-            Some(PM1Status::Battery(battery_percent))
+    fn update_battery_percent(&self, battery_percent: u8) -> Option<PM1Event> {
+        let mut status = self.status.write().unwrap();
+        if battery_percent != status.battery_percent {
+            status.battery_percent = battery_percent;
+            Some(PM1Event::Battery(battery_percent))
         } else {
             None
         }
     }
 
-    fn update_power_switch(&mut self, power_switch: u8) -> Option<PM1Status> {
+    fn update_power_switch(&self, power_switch: u8) -> Option<PM1Event> {
+        let mut status = self.status.write().unwrap();
         let power_switch = power_switch != 0;
-        if power_switch != self.power_switch {
-            self.power_switch = power_switch;
-            Some(PM1Status::PowerSwitch(power_switch))
+        if power_switch != status.power_switch {
+            status.power_switch = power_switch;
+            Some(PM1Event::PowerSwitch(power_switch))
         } else {
             None
         }
     }
 
-    fn update_rudder(&mut self, time: Instant, rudder: i16) -> Option<PM1Status> {
+    fn update_rudder(&mut self, time: Instant, rudder: i16) -> Option<PM1Event> {
+        let mut status = self.status.write().unwrap();
         let rudder = RUDDER.pluses_to_rad(rudder.into());
-        let mut current = self.current;
+        let mut current = status.physical;
         // 更新状态
         current.rudder = if rudder > FRAC_PI_2 {
             FRAC_PI_2
@@ -186,7 +202,7 @@ impl PM1 {
             rudder
         };
         // 正在使用遥控器，跳过控制
-        let target = if time > self.using_pad + Self::PAD_CONTROL_WINDOW {
+        let target = if time > self.using_pad + PAD_CONTROL_WINDOW {
             let mut guard = self.target.lock().unwrap();
             let (deadline, physical) = *guard;
             if time >= deadline {
@@ -196,7 +212,7 @@ impl PM1 {
                 } else {
                     Some(Physical::RELEASED)
                 }
-            } else if !self.power_switch {
+            } else if !status.power_switch {
                 // 急停按开关断开
                 *guard = (time, Physical::RELEASED);
                 None
@@ -243,15 +259,15 @@ impl PM1 {
 
             self.port.write(reply);
         }
-        if current != self.current {
-            self.current = current;
-            Some(PM1Status::Status(current))
+        if current != status.physical {
+            status.physical = current;
+            Some(PM1Event::Status(current))
         } else {
             None
         }
     }
 
-    fn receive(&mut self, time: Instant, msg: Message) -> Option<PM1Status> {
+    fn receive(&mut self, time: Instant, msg: Message) -> Option<PM1Event> {
         let header = unsafe { msg.header() };
         let data = header.data_field();
         let t_node = header.node_type();
@@ -347,7 +363,7 @@ impl PM1 {
 }
 
 impl Iterator for PM1 {
-    type Item = PM1Status;
+    type Item = PM1Event;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut time = Instant::now();
@@ -359,13 +375,31 @@ impl Iterator for PM1 {
             } else {
                 match self.port.read(self.buffer.as_buf()) {
                     Some(n) => {
-                        time = Instant::now();
-                        self.buffer.notify_received(n);
+                        if n == 0 {
+                            return None;
+                        } else {
+                            time = Instant::now();
+                            self.buffer.notify_received(n);
+                        }
                     }
-                    // None => return None,
-                    None => {}
+                    None => return None,
                 };
             }
+        }
+    }
+}
+
+impl PM1Interface {
+    pub fn get(&self) -> PM1Status {
+        *self.status.read().unwrap()
+    }
+
+    pub fn set_target(&self, target: Physical) -> bool {
+        if let Some(mutex) = self.target.upgrade() {
+            *mutex.lock().unwrap() = (Instant::now() + TARGET_MEMORY_WINDOW, target);
+            true
+        } else {
+            false
         }
     }
 }
