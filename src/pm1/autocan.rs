@@ -109,6 +109,9 @@ impl Message {
             result.0[i] = header.0[i];
             i += 1;
         }
+        if !data_field {
+            result.0[5] = crc_cauculate_const(&result.0, 1, 5);
+        }
         result
     }
 
@@ -181,7 +184,7 @@ impl Drop for MessageWriter<'_> {
     }
 }
 
-fn crc_cauculate(buffer: &[u8]) -> u8 {
+const fn crc_cauculate_const(buffer: &[u8], begin: usize, end: usize) -> u8 {
     const CRC8: [u8; 256] = [
         0, 94, 188, 226, 97, 63, 221, 131, 194, 156, 126, 32, 163, 253, 31, 65, 157, 195, 33, 127,
         252, 162, 64, 30, 95, 1, 227, 189, 62, 96, 130, 220, 35, 125, 159, 193, 66, 28, 254, 160,
@@ -198,7 +201,15 @@ fn crc_cauculate(buffer: &[u8]) -> u8 {
         246, 168, 116, 42, 200, 150, 21, 75, 169, 247, 182, 232, 10, 84, 215, 137, 107, 53,
     ];
 
-    buffer
-        .iter()
-        .fold(0u8, |sum, item| CRC8[(sum ^ *item) as usize])
+    let mut sum = 0u8;
+    let mut i = begin;
+    while i < end {
+        sum = CRC8[(sum ^ buffer[i]) as usize];
+        i += 1;
+    }
+    sum
+}
+
+const fn crc_cauculate(buffer: &[u8]) -> u8 {
+    crc_cauculate_const(buffer, 0, buffer.len())
 }

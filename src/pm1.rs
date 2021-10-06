@@ -90,11 +90,11 @@ impl Queries {
             message(vcu::TYPE, EVERY_INDEX, vcu::BATTERY_PERCENT, false),
         ];
 
-        let mut messages = MSG;
         let mut buffer = [0u8; 30];
-        for i in 0..messages.len() {
-            messages[i].write();
-            buffer[i * 6..][..6].copy_from_slice(&messages[i].as_slice());
+        let mut i = 0;
+        while i < MSG.len() {
+            buffer[i * 6..][..6].copy_from_slice(&MSG[i].as_slice());
+            i += 1;
         }
         Self(buffer)
     }
@@ -188,8 +188,7 @@ impl PM1 {
                     // 主动询问
                     vcu::POWER_SWITCH => {
                         if header.data_field() {
-                            let power_switch: u8 = unsafe { msg.read().read_unchecked() };
-                            self.power_switch = power_switch > 0;
+                            self.power_switch = unsafe { msg.read().read_unchecked::<u8>() } > 0;
                         }
                         None
                     }
@@ -242,7 +241,8 @@ impl PM1 {
                             }
                             // 正在使用遥控器，跳过控制
                             if time > self.using_pad + Self::PAD_CONTROL_WINDOW {
-                                let (deadline, physical) = *self.target.lock().unwrap();
+                                let mut guard = self.target.lock().unwrap();
+                                let (deadline, physical) = *guard;
                                 target = if time >= deadline {
                                     // 距离上次接收已经超时
                                     if self.current.speed == 0.0 {
@@ -250,6 +250,10 @@ impl PM1 {
                                     } else {
                                         Some(Physical::RELEASED)
                                     }
+                                } else if !self.power_switch {
+                                    // 急停按开关断开
+                                    *guard = (time, Physical::RELEASED);
+                                    None
                                 } else {
                                     Some(physical)
                                 };
@@ -270,49 +274,42 @@ impl PM1 {
             },
         };
 
-        let mut reply = [0u8; 14 * 4];
-        let mut cursor = 0usize;
-
         if let Some(mut target) = target {
-            if self.state_memory.iter().any(|(_, s)| *s == 0xff) {
-                // 解锁
-                let mut message = message(EVERY_TYPE, EVERY_INDEX, STOP, true);
-                unsafe { message.write().write_unchecked(0xff as u8) };
-                reply[..14].copy_from_slice(message.as_slice());
-                cursor += 14;
-            }
-            // 控制
+            // 执行优化，更新缓存
             if target.rudder.is_nan() {
                 target.rudder = self.current.rudder;
             }
             target.speed = self.optimizer.optimize_speed(target, self.current);
             self.current.speed = target.speed;
             let Wheels { left: l, right: r } = self.model.physical_to_wheels(self.current);
-            {
-                let l = WHEEL.rad_to_pulses(l);
-                let mut message = message(ecu::TYPE, 0, ecu::TARGET_SPEED, true);
-                unsafe { message.write().write_unchecked(l) };
-                reply[cursor..][..14].copy_from_slice(message.as_slice());
-                cursor += 14;
-            }
-            {
-                let r = WHEEL.rad_to_pulses(r);
-                let mut message = message(ecu::TYPE, 1, ecu::TARGET_SPEED, true);
-                unsafe { message.write().write_unchecked(r) };
-                reply[cursor..][..14].copy_from_slice(message.as_slice());
-                cursor += 14;
-            }
-            {
-                let r = RUDDER.rad_to_pulses(target.rudder) as i16;
-                let mut message = message(tcu::TYPE, 0, tcu::TARGET_POSITION, true);
-                unsafe { message.write().write_unchecked(r) };
-                reply[cursor..][..14].copy_from_slice(message.as_slice());
-                cursor += 14;
-            }
-        }
+            // 编码
+            let reply = unsafe {
+                const MSG: [Message; 4] = [
+                    message(EVERY_TYPE, EVERY_INDEX, STOP, true),
+                    message(ecu::TYPE, 0, ecu::TARGET_SPEED, true),
+                    message(ecu::TYPE, 1, ecu::TARGET_SPEED, true),
+                    message(tcu::TYPE, 0, tcu::TARGET_POSITION, true),
+                ];
+                const LEN: usize = std::mem::size_of::<Message>();
 
-        if cursor > 0 {
-            self.port.write(&reply[..cursor]);
+                let mut msg = MSG;
+                // 控制
+                msg[1].write().write_unchecked(WHEEL.rad_to_pulses(l));
+                msg[2].write().write_unchecked(WHEEL.rad_to_pulses(r));
+                msg[3]
+                    .write()
+                    .write_unchecked(RUDDER.rad_to_pulses(target.rudder) as i16);
+                // 解锁
+                let msg = if self.state_memory.iter().any(|(_, s)| *s == 0xff) {
+                    msg[0].write().write_unchecked(0xff as u8);
+                    &msg
+                } else {
+                    &msg[1..]
+                };
+                std::slice::from_raw_parts(msg.as_ptr() as *const u8, msg.len() * LEN)
+            };
+
+            self.port.write(reply);
         }
 
         result
