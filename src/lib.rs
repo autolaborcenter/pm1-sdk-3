@@ -33,7 +33,7 @@ impl PM1Threads {
             chassis.push(Some(Box::new(pm1)));
         }
 
-        send_in_thread(senders);
+        send_on_single_thread(senders);
 
         {
             let counter = Arc::new(());
@@ -84,28 +84,49 @@ fn may_open(name: &String) -> Option<(PM1QuerySender, PM1)> {
     }
 }
 
-fn send_in_thread(mut senders: Vec<Option<Box<PM1QuerySender>>>) -> JoinHandle<()> {
+struct Timer(Instant);
+
+impl Timer {
+    fn wait_per(&mut self, period: Duration) {
+        let now = Instant::now();
+        while self.0 <= now {
+            self.0 += period;
+        }
+        thread::sleep(self.0 - now);
+    }
+}
+
+fn send_on_single_thread(mut senders: Vec<Option<Box<PM1QuerySender>>>) -> JoinHandle<()> {
+    const PERIOD: Duration = Duration::from_millis(40);
     thread::spawn(move || {
-        let mut time = Instant::now();
+        let mut timer = Timer(Instant::now());
         loop {
-            senders = senders
+            let count = senders
                 .iter_mut()
-                .filter_map(|s| {
-                    if s.as_mut().unwrap().send() {
-                        Some(std::mem::replace(s, None))
+                .filter_map(|o| {
+                    if let Some(ref mut s) = o {
+                        if s.send() {
+                            Some(())
+                        } else {
+                            *o = None;
+                            None
+                        }
                     } else {
                         None
                     }
                 })
-                .collect();
-            if senders.is_empty() {
-                break;
+                .count();
+            match count {
+                0 => return,
+                1 => break,
+                _ => {}
             }
-            let now = Instant::now();
-            while time <= now {
-                time += Duration::from_millis(40);
+            timer.wait_per(PERIOD);
+        }
+        if let Some(mut sender) = std::mem::replace(&mut senders[0], None) {
+            while sender.send() {
+                timer.wait_per(PERIOD);
             }
-            thread::sleep(time - now);
         }
     })
 }
