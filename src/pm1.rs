@@ -111,7 +111,7 @@ pub fn pm1(port: Port) -> (PM1QuerySender, PM1) {
 struct Queries([u8; 30]);
 
 impl Queries {
-    pub fn new() -> Self {
+    fn new() -> Self {
         const MSG: [Message; 5] = [
             message(tcu::TYPE, EVERY_INDEX, tcu::CURRENT_POSITION, false),
             message(ecu::TYPE, EVERY_INDEX, ecu::CURRENT_POSITION, false),
@@ -399,7 +399,7 @@ impl PM1 {
 }
 
 impl Iterator for PM1 {
-    type Item = PM1Event;
+    type Item = (Instant, PM1Event);
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut time = Instant::now();
@@ -408,7 +408,7 @@ impl Iterator for PM1 {
             if let Some(msg) = self.buffer.next() {
                 // 成功从缓存中消费
                 if let Some(status) = self.receive(time, msg) {
-                    return Some(status);
+                    return Some((time, status));
                 } else {
                     deadline = time + MESSAGE_PARSE_TIMEOUT;
                 }

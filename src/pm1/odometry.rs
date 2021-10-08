@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Odometry {
-    s: f32,
-    a: f32,
-    pose: Isometry2<f32>,
+    pub s: f32,
+    pub a: f32,
+    pub pose: Isometry2<f32>,
 }
 
 impl Odometry {
@@ -57,7 +57,7 @@ impl std::ops::Add for Odometry {
     }
 }
 
-pub struct Differential {
+pub(crate) struct Differential {
     initialized: bool,
     memory: (i32, i32),
 
