@@ -14,7 +14,7 @@ fn main() {
     if let Some(chassis) = find_pm1!() {
         let handle = chassis.get_handle();
         thread::spawn(move || {
-            let mut target = Physical::ZERO;
+            let mut speed = 0f32;
             let mut last: Option<(Instant, KeyEvent)> = None;
 
             let _ = enable_raw_mode();
@@ -38,8 +38,8 @@ fn main() {
                             modifiers: KeyModifiers::CONTROL,
                         } => {
                             if available() {
-                                target.speed = f32::min(target.speed + 0.05, 1.0);
-                                println!("target = {:?}", target);
+                                speed = f32::min(speed + 0.2, 1.0);
+                                println!("speed = {:?}", speed);
                             }
                         }
                         KeyEvent {
@@ -47,50 +47,46 @@ fn main() {
                             modifiers: KeyModifiers::CONTROL,
                         } => {
                             if available() {
-                                target.speed = f32::max(target.speed - 0.05, 0.0);
-                                println!("target = {:?}", target);
+                                speed = f32::max(speed - 0.2, 0.0);
+                                println!("speed = {:?}", speed);
                             }
-                        }
-                        KeyEvent {
-                            code: KeyCode::Char(' '),
-                            modifiers: _,
-                        } => {
-                            target = Physical::ZERO;
-                            println!("target = {:?}", target);
-                            handle.set_target(target);
                         }
                         KeyEvent {
                             code: KeyCode::Up,
                             modifiers: KeyModifiers::NONE,
                         } => {
-                            handle.set_target(target);
+                            handle.set_target(Physical { speed, rudder: 0.0 });
                         }
                         KeyEvent {
                             code: KeyCode::Down,
                             modifiers: KeyModifiers::NONE,
                         } => {
                             handle.set_target(Physical {
-                                speed: -target.speed,
-                                ..target
+                                speed: -speed,
+                                rudder: 0.0,
                             });
                         }
                         KeyEvent {
                             code: KeyCode::Left,
                             modifiers: KeyModifiers::NONE,
                         } => {
-                            target.rudder = f32::max(target.rudder - 0.1, -FRAC_PI_2);
-                            handle.set_target(target);
+                            handle.set_target(Physical {
+                                speed,
+                                rudder: -FRAC_PI_2,
+                            });
                         }
                         KeyEvent {
                             code: KeyCode::Right,
                             modifiers: KeyModifiers::NONE,
                         } => {
-                            target.rudder = f32::min(target.rudder + 0.1, FRAC_PI_2);
-                            handle.set_target(target);
+                            handle.set_target(Physical {
+                                speed,
+                                rudder: FRAC_PI_2,
+                            });
                         }
                         _ => {
-                            target.speed = 0.0;
-                            handle.set_target(target);
+                            println!();
+                            handle.set_target(Physical::ZERO);
                         }
                     };
                     last = Some((now, event));
