@@ -1,4 +1,4 @@
-﻿use pm1_sdk_3::find_pm1;
+﻿use pm1_sdk::find_pm1;
 
 fn main() {
     if let Some(chassis) = find_pm1!() {

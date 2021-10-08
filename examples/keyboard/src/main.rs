@@ -3,7 +3,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode},
 };
 use pm1_control_model::Physical;
-use pm1_sdk_3::find_pm1;
+use pm1_sdk::find_pm1;
 use std::{
     f32::consts::FRAC_PI_2,
     thread,

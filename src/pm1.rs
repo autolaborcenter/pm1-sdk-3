@@ -1,6 +1,4 @@
-﻿use self::node::*;
-use autocan::{Message, MessageBuffer};
-use pm1_control_model::{
+﻿use pm1_control_model::{
     model::ChassisModel,
     motor::{RUDDER, WHEEL},
     optimizer::Optimizer,
@@ -15,7 +13,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub mod autocan;
+mod autocan;
+pub mod odometry;
+
+use self::{node::*, odometry::Odometry};
+use autocan::{Message, MessageBuffer};
+use odometry::Differential;
 
 pub const CONTROL_PERIOD: Duration = Duration::from_millis(40); // 默认的控制周期
 const TARGET_MEMORY_TIMEOUT: Duration = Duration::from_millis(200); // 超时则将目标改为停止
@@ -38,6 +41,7 @@ pub struct PM1 {
     status: Arc<RwLock<PM1Status>>,
     target: Arc<Mutex<(Instant, Physical)>>,
 
+    differential: Differential,
     model: ChassisModel,
     optimizer: Optimizer,
 }
@@ -47,6 +51,7 @@ pub struct PM1Status {
     battery_percent: u8,
     power_switch: bool,
     physical: Physical,
+    odometry: Odometry,
 }
 
 pub struct PM1QuerySender {
@@ -67,7 +72,7 @@ pub enum PM1Event {
     Battery(u8),
     PowerSwitch(bool),
     Status(Physical),
-    Odometry(f32, nalgebra::Isometry2<f32>),
+    Odometry(Odometry),
 }
 
 pub fn pm1(port: Port) -> (PM1QuerySender, PM1) {
@@ -92,9 +97,11 @@ pub fn pm1(port: Port) -> (PM1QuerySender, PM1) {
                 battery_percent: 0,
                 power_switch: false,
                 physical: Physical::RELEASED,
+                odometry: Odometry::ZERO,
             })),
             target: Arc::new(Mutex::new((now, Physical::RELEASED))),
 
+            differential: Differential::new(),
             model: Default::default(),
             optimizer: Optimizer::new(0.5, 1.2, CONTROL_PERIOD),
         },
@@ -191,6 +198,23 @@ impl PM1 {
         if power_switch != status.power_switch {
             status.power_switch = power_switch;
             Some(PM1Event::PowerSwitch(power_switch))
+        } else {
+            None
+        }
+    }
+
+    fn update_odometry(&mut self, time: Instant, which: u8, value: i32) -> Option<PM1Event> {
+        if let Some((dl, dr)) = self.differential.update(time, which, value) {
+            let (s, a) = self
+                .model
+                .wheels_rad_to_delta((WHEEL.pluses_to_rad(dl), WHEEL.pluses_to_rad(dr)));
+            if s == 0.0 && a == 0.0 {
+                None
+            } else {
+                let mut status = self.status.write().unwrap();
+                status.odometry = status.odometry + Odometry::from_delta(s, a);
+                Some(PM1Event::Odometry(status.odometry))
+            }
         } else {
             None
         }
@@ -334,8 +358,13 @@ impl PM1 {
                     // 当前位置
                     // 主动询问
                     ecu::CURRENT_POSITION => {
-                        // TODO 更新里程计
-                        None
+                        if data {
+                            self.update_odometry(time, header.node_index(), unsafe {
+                                msg.read().read_unchecked()
+                            })
+                        } else {
+                            None
+                        }
                     }
                     // 其他，不需要解析
                     _ => None,
@@ -421,7 +450,7 @@ impl PM1Handle {
 
 #[inline]
 const fn message(node_type: u8, node_index: u8, msg_type: u8, data_field: bool) -> Message {
-    Message::new(0, data_field, 0, node_type, node_index, msg_type)
+    Message::new(0, data_field, 3, node_type, node_index, msg_type)
 }
 
 impl Display for PM1Status {

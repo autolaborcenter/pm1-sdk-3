@@ -13,10 +13,10 @@ pub struct PM1Threads;
 #[macro_export]
 macro_rules! find_pm1 {
     () => {
-        pm1_sdk_3::PM1Threads::open_all()
+        pm1_sdk::PM1Threads::open_all()
     };
     ($($x:expr)+) => {
-        pm1_sdk_3::PM1Threads::open_some(&[$(String::from($x),)*])
+        pm1_sdk::PM1Threads::open_some(&[$(String::from($x),)*])
     };
 }
 

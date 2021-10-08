@@ -1,5 +1,5 @@
 [package]
-name = "pm1-sdk-3"
+name = "pm1-sdk"
 version = "0.1.0"
 edition = "2021"
 authors = ["YdrMaster <ydrml@hotmail.com>"]
