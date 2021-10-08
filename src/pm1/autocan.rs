@@ -115,12 +115,12 @@ impl Message {
         result
     }
 
-    pub unsafe fn header<'a>(&'a self) -> &'a Header {
-        (self.0.as_ptr() as *const Header).as_ref().unwrap()
+    pub fn header<'a>(&'a self) -> &'a Header {
+        unsafe { (self.0.as_ptr() as *const Header).as_ref() }.unwrap()
     }
 
     pub fn as_slice<'a>(&'a self) -> &'a [u8] {
-        if unsafe { self.header() }.data_field() {
+        if self.header().data_field() {
             &self.0
         } else {
             &self.0[..6]
@@ -144,12 +144,7 @@ impl Message {
 
 impl Display for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "MSG: {} | {:?}",
-            unsafe { self.header() },
-            self.as_slice()
-        )
+        write!(f, "MSG: {} | {:?}", self.header(), self.as_slice())
     }
 }
 
@@ -176,7 +171,7 @@ impl MessageWriter<'_> {
 
 impl Drop for MessageWriter<'_> {
     fn drop(&mut self) {
-        if unsafe { self.msg.header() }.data_field() {
+        if self.msg.header().data_field() {
             self.msg.0[13] = crc_cauculate(&self.msg.0[1..13]);
         } else {
             self.msg.0[5] = crc_cauculate(&self.msg.0[1..5]);

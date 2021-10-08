@@ -292,7 +292,7 @@ impl PM1 {
     }
 
     fn receive(&mut self, time: Instant, msg: Message) -> Option<PM1Event> {
-        let header = unsafe { msg.header() };
+        let header = msg.header();
         let data = header.data_field();
         let t_node = header.node_type();
         let i_node = header.node_index();
