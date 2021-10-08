@@ -212,7 +212,7 @@ impl PM1 {
                 None
             } else {
                 let mut status = self.status.write().unwrap();
-                status.odometry = status.odometry + Odometry::from_delta(s, a);
+                status.odometry += Odometry::from_delta(s, a);
                 Some(PM1Event::Odometry(status.odometry))
             }
         } else {

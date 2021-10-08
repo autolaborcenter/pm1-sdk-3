@@ -39,15 +39,21 @@ impl Odometry {
     }
 }
 
+impl std::ops::AddAssign for Odometry {
+    fn add_assign(&mut self, rhs: Self) {
+        self.s += rhs.s;
+        self.a += rhs.a;
+        self.pose *= rhs.pose;
+    }
+}
+
 impl std::ops::Add for Odometry {
-    type Output = Odometry;
+    type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        Self::Output {
-            s: self.s + rhs.s,
-            a: self.a + rhs.a,
-            pose: self.pose * rhs.pose,
-        }
+        let mut copy = self.clone();
+        copy += rhs;
+        copy
     }
 }
 
