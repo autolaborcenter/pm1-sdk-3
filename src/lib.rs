@@ -1,4 +1,4 @@
-use pm1::{pm1, PM1QuerySender, PM1};
+use pm1::{pm1, PM1Pacemaker, PM1};
 use serial_port::{Port, SerialPort};
 use std::{
     sync::Arc,
@@ -23,7 +23,7 @@ macro_rules! find_pm1 {
 impl PM1Threads {
     /// 打开一些串口
     pub fn open_some(paths: &[String]) -> Option<Box<PM1>> {
-        let mut senders = Vec::<Option<Box<PM1QuerySender>>>::new();
+        let mut senders = Vec::<Option<Box<PM1Pacemaker>>>::new();
         let mut chassis = Vec::<Option<Box<PM1>>>::new();
         for (sender, pm1) in paths.iter().filter_map(may_open) {
             senders.push(Some(Box::new(sender)));
@@ -61,7 +61,7 @@ impl PM1Threads {
     }
 }
 
-fn may_open(name: &String) -> Option<(PM1QuerySender, PM1)> {
+fn may_open(name: &String) -> Option<(PM1Pacemaker, PM1)> {
     let path: String = if cfg!(target_os = "windows") {
         name.rmatch_indices("COM")
             .next()
@@ -93,7 +93,7 @@ impl Timer {
     }
 }
 
-fn send_on_single_thread(mut senders: Vec<Option<Box<PM1QuerySender>>>) -> JoinHandle<()> {
+fn send_on_single_thread(mut senders: Vec<Option<Box<PM1Pacemaker>>>) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut timer = Timer(Instant::now());
         loop {
@@ -124,4 +124,46 @@ fn send_on_single_thread(mut senders: Vec<Option<Box<PM1QuerySender>>>) -> JoinH
             timer.wait_per(pm1::CONTROL_PERIOD);
         }
     })
+}
+
+pub trait DriverStatus: 'static + Clone {
+    type Event;
+
+    fn update(&mut self, event: Self::Event);
+}
+
+pub trait Driver<S: DriverStatus>: 'static + Iterator<Item = (Instant, S::Event)> {
+    type Handle: DriverHandle;
+
+    fn handle(&self) -> Self::Handle;
+    fn status(&self) -> S;
+}
+
+pub trait DriverHandle: 'static + Clone {
+    type Command;
+
+    fn send(&self, command: Self::Command) -> bool;
+}
+
+#[derive(Clone)]
+pub struct DefaultHandle;
+
+impl DriverHandle for DefaultHandle {
+    type Command = ();
+
+    fn send(&self, _: Self::Command) -> bool {
+        false
+    }
+}
+
+pub trait DriverPacemaker: 'static {
+    fn send(&mut self) -> bool;
+}
+
+struct DefaultPacemaker;
+
+impl DriverPacemaker for DefaultPacemaker {
+    fn send(&mut self) -> bool {
+        false
+    }
 }

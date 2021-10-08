@@ -17,6 +17,7 @@ mod autocan;
 pub mod odometry;
 
 use self::{node::*, odometry::Odometry};
+use super::{Driver, DriverHandle, DriverPacemaker, DriverStatus};
 use autocan::{Message, MessageBuffer};
 use odometry::Differential;
 
@@ -54,13 +55,14 @@ pub struct PM1Status {
     odometry: Odometry,
 }
 
-pub struct PM1QuerySender {
+pub struct PM1Pacemaker {
     port: Weak<Port>,
 
     next: Instant,
     index: usize,
 }
 
+#[derive(Clone)]
 pub struct PM1Handle(Weak<Mutex<(Instant, Physical)>>);
 
 #[derive(Debug)]
@@ -71,10 +73,72 @@ pub enum PM1Event {
     Odometry(Odometry),
 }
 
-pub fn pm1(port: Port) -> (PM1QuerySender, PM1) {
+impl DriverStatus for PM1Status {
+    type Event = PM1Event;
+
+    fn update(&mut self, event: Self::Event) {
+        match event {
+            PM1Event::Battery(b) => self.battery_percent = b,
+            PM1Event::PowerSwitch(b) => self.power_switch = b,
+            PM1Event::Physical(physical) => self.physical = physical,
+            PM1Event::Odometry(odometry) => self.odometry = odometry,
+        }
+    }
+}
+
+impl DriverPacemaker for PM1Pacemaker {
+    fn send(&mut self) -> bool {
+        let now = Instant::now();
+        let mut len = 0usize;
+        while self.next < now {
+            self.next += CONTROL_PERIOD;
+            self.index += 1;
+            if len == 5 {
+            } else if self.index % 250 == 0 {
+                len = 5; // 电池电量
+            } else if len == 4 {
+            } else if self.index % 10 == 0 {
+                len = 4; // 状态和急停按钮
+            } else if len == 2 {
+            } else if self.index % 2 == 0 {
+                len = 2; // 里程计
+            } else {
+                len = 1; // 后轮方向
+            }
+        }
+        self.send_len(len)
+    }
+}
+
+impl DriverHandle for PM1Handle {
+    type Command = Physical;
+
+    fn send(&self, command: Self::Command) -> bool {
+        if let Some(mutex) = self.0.upgrade() {
+            *mutex.lock().unwrap() = (Instant::now() + TARGET_MEMORY_TIMEOUT, command);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Driver<PM1Status> for PM1 {
+    type Handle = PM1Handle;
+
+    fn handle(&self) -> Self::Handle {
+        PM1Handle(Arc::downgrade(&self.target))
+    }
+
+    fn status(&self) -> PM1Status {
+        self.status
+    }
+}
+
+pub fn pm1(port: Port) -> (PM1Pacemaker, PM1) {
     let now = Instant::now();
     let port = Arc::new(port);
-    let sender = PM1QuerySender {
+    let sender = PM1Pacemaker {
         port: Arc::downgrade(&port),
 
         next: now,
@@ -130,7 +194,7 @@ lazy_static::lazy_static! {
     static ref QUERIES: Queries = Queries::new();
 }
 
-impl PM1QuerySender {
+impl PM1Pacemaker {
     fn send_len(&self, len: usize) -> bool {
         if let Some(port) = self.port.upgrade() {
             if len > 0 {
@@ -141,39 +205,9 @@ impl PM1QuerySender {
             false
         }
     }
-
-    pub fn send(&mut self) -> bool {
-        let now = Instant::now();
-        let mut len = 0usize;
-        while self.next < now {
-            self.next += CONTROL_PERIOD;
-            self.index += 1;
-            if len == 5 {
-            } else if self.index % 250 == 0 {
-                len = 5; // 电池电量
-            } else if len == 4 {
-            } else if self.index % 10 == 0 {
-                len = 4; // 状态和急停按钮
-            } else if len == 2 {
-            } else if self.index % 2 == 0 {
-                len = 2; // 里程计
-            } else {
-                len = 1; // 后轮方向
-            }
-        }
-        self.send_len(len)
-    }
 }
 
 impl PM1 {
-    pub fn handle(&self) -> PM1Handle {
-        PM1Handle(Arc::downgrade(&self.target))
-    }
-
-    pub fn status(&self) -> PM1Status {
-        self.status
-    }
-
     fn detect_control_pad(&mut self, time: Instant) {
         self.using_pad = time;
         self.status.physical.speed = 0.0;
@@ -433,17 +467,6 @@ impl PM1Handle {
             true
         } else {
             false
-        }
-    }
-}
-
-impl PM1Status {
-    pub fn update(&mut self, event: PM1Event) {
-        match event {
-            PM1Event::Battery(b) => self.battery_percent = b,
-            PM1Event::PowerSwitch(b) => self.power_switch = b,
-            PM1Event::Physical(physical) => self.physical = physical,
-            PM1Event::Odometry(odometry) => self.odometry = odometry,
         }
     }
 }
