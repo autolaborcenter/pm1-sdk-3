@@ -6,6 +6,7 @@ authors = ["YdrMaster <ydrml@hotmail.com>"]
 readme = "README.md"
 
 [dependencies]
+driver = { path = "../driver" }
 pm1-control-model = { path = "../pm1-control-model" }
 serial-port = { path = "../serial-port" }
 nalgebra = "*"

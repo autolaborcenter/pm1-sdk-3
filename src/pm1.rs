@@ -17,11 +17,11 @@ mod autocan;
 pub mod odometry;
 
 use self::{node::*, odometry::Odometry};
-use super::{Driver, DriverHandle, DriverPacemaker, DriverStatus};
 use autocan::{Message, MessageBuffer};
+use driver::{Driver, DriverHandle, DriverPacemaker, DriverStatus};
 use odometry::Differential;
 
-pub const CONTROL_PERIOD: Duration = Duration::from_millis(40); // 默认的控制周期
+const CONTROL_PERIOD: Duration = Duration::from_millis(40); // 控制周期
 const TARGET_MEMORY_TIMEOUT: Duration = Duration::from_millis(200); // 超时则将目标改为停止
 const PAD_CONTROL_TIMEOUT: Duration = Duration::from_millis(200); // 在此保护时间内不进行控制
 const MESSAGE_PARSE_TIMEOUT: Duration = Duration::from_millis(250); // 超时认为底盘已断开，立即退出
@@ -87,6 +87,10 @@ impl DriverStatus for PM1Status {
 }
 
 impl DriverPacemaker for PM1Pacemaker {
+    fn period() -> Duration {
+        CONTROL_PERIOD
+    }
+
     fn send(&mut self) -> bool {
         let now = Instant::now();
         let mut len = 0usize;
@@ -456,17 +460,6 @@ impl Iterator for PM1 {
                     None => return None,
                 };
             }
-        }
-    }
-}
-
-impl PM1Handle {
-    pub fn set_target(&self, target: Physical) -> bool {
-        if let Some(mutex) = self.0.upgrade() {
-            *mutex.lock().unwrap() = (Instant::now() + TARGET_MEMORY_TIMEOUT, target);
-            true
-        } else {
-            false
         }
     }
 }

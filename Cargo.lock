@@ -55,6 +55,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb58b6451e8c2a812ad979ed1d83378caa5e927eef2622017a45f251457c2c9d"
 
 [[package]]
+name = "driver"
+version = "0.1.0"
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -177,6 +181,7 @@ version = "0.1.0"
 name = "pm1-sdk"
 version = "0.1.0"
 dependencies = [
+ "driver",
  "lazy_static",
  "nalgebra",
  "pm1-control-model",
