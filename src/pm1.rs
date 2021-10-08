@@ -9,7 +9,7 @@ use std::{
     collections::HashMap,
     f32::consts::FRAC_PI_2,
     fmt::Display,
-    sync::{Arc, Mutex, RwLock, Weak},
+    sync::{Arc, Mutex, Weak},
     time::{Duration, Instant},
 };
 
@@ -38,7 +38,7 @@ pub struct PM1 {
 
     using_pad: Instant,
     state_memory: HashMap<(u8, u8), u8>,
-    status: Arc<RwLock<PM1Status>>,
+    status: PM1Status,
     target: Arc<Mutex<(Instant, Physical)>>,
 
     differential: Differential,
@@ -61,17 +61,13 @@ pub struct PM1QuerySender {
     index: usize,
 }
 
-#[derive(Clone)]
-pub struct PM1Handle {
-    status: Arc<RwLock<PM1Status>>,
-    target: Weak<Mutex<(Instant, Physical)>>,
-}
+pub struct PM1Handle(Weak<Mutex<(Instant, Physical)>>);
 
 #[derive(Debug)]
 pub enum PM1Event {
     Battery(u8),
     PowerSwitch(bool),
-    Status(Physical),
+    Physical(Physical),
     Odometry(Odometry),
 }
 
@@ -93,12 +89,12 @@ pub fn pm1(port: Port) -> (PM1QuerySender, PM1) {
 
             using_pad: now,
             state_memory: HashMap::new(),
-            status: Arc::new(RwLock::new(PM1Status {
+            status: PM1Status {
                 battery_percent: 0,
                 power_switch: false,
                 physical: Physical::RELEASED,
                 odometry: Odometry::ZERO,
-            })),
+            },
             target: Arc::new(Mutex::new((now, Physical::RELEASED))),
 
             differential: Differential::new(),
@@ -170,33 +166,32 @@ impl PM1QuerySender {
 }
 
 impl PM1 {
-    pub fn get_handle(&self) -> PM1Handle {
-        PM1Handle {
-            status: self.status.clone(),
-            target: Arc::downgrade(&self.target),
-        }
+    pub fn handle(&self) -> PM1Handle {
+        PM1Handle(Arc::downgrade(&self.target))
+    }
+
+    pub fn status(&self) -> PM1Status {
+        self.status
     }
 
     fn detect_control_pad(&mut self, time: Instant) {
         self.using_pad = time;
-        self.status.write().unwrap().physical.speed = 0.0;
+        self.status.physical.speed = 0.0;
     }
 
-    fn update_battery_percent(&self, battery_percent: u8) -> Option<PM1Event> {
-        let mut status = self.status.write().unwrap();
-        if battery_percent != status.battery_percent {
-            status.battery_percent = battery_percent;
+    fn update_battery_percent(&mut self, battery_percent: u8) -> Option<PM1Event> {
+        if battery_percent != self.status.battery_percent {
+            self.status.battery_percent = battery_percent;
             Some(PM1Event::Battery(battery_percent))
         } else {
             None
         }
     }
 
-    fn update_power_switch(&self, power_switch: u8) -> Option<PM1Event> {
-        let mut status = self.status.write().unwrap();
+    fn update_power_switch(&mut self, power_switch: u8) -> Option<PM1Event> {
         let power_switch = power_switch != 0;
-        if power_switch != status.power_switch {
-            status.power_switch = power_switch;
+        if power_switch != self.status.power_switch {
+            self.status.power_switch = power_switch;
             Some(PM1Event::PowerSwitch(power_switch))
         } else {
             None
@@ -211,9 +206,8 @@ impl PM1 {
             if s == 0.0 && a == 0.0 {
                 None
             } else {
-                let mut status = self.status.write().unwrap();
-                status.odometry += Odometry::from_delta(s, a);
-                Some(PM1Event::Odometry(status.odometry))
+                self.status.odometry += Odometry::from_delta(s, a);
+                Some(PM1Event::Odometry(self.status.odometry))
             }
         } else {
             None
@@ -221,9 +215,8 @@ impl PM1 {
     }
 
     fn update_rudder(&mut self, time: Instant, rudder: i16) -> Option<PM1Event> {
-        let mut status = self.status.write().unwrap();
         let rudder = RUDDER.pluses_to_rad(rudder.into());
-        let mut current = status.physical;
+        let mut current = self.status.physical;
         // 更新状态
         current.rudder = if rudder > FRAC_PI_2 {
             FRAC_PI_2
@@ -243,7 +236,7 @@ impl PM1 {
                 } else {
                     Some(Physical::RELEASED)
                 }
-            } else if !status.power_switch {
+            } else if !self.status.power_switch {
                 // 急停按开关断开
                 *guard = (time, Physical::RELEASED);
                 None
@@ -290,9 +283,9 @@ impl PM1 {
 
             self.port.write(reply);
         }
-        if current != status.physical {
-            status.physical = current;
-            Some(PM1Event::Status(current))
+        if current != self.status.physical {
+            self.status.physical = current;
+            Some(PM1Event::Physical(current))
         } else {
             None
         }
@@ -434,16 +427,23 @@ impl Iterator for PM1 {
 }
 
 impl PM1Handle {
-    pub fn get(&self) -> PM1Status {
-        *self.status.read().unwrap()
-    }
-
     pub fn set_target(&self, target: Physical) -> bool {
-        if let Some(mutex) = self.target.upgrade() {
+        if let Some(mutex) = self.0.upgrade() {
             *mutex.lock().unwrap() = (Instant::now() + TARGET_MEMORY_TIMEOUT, target);
             true
         } else {
             false
+        }
+    }
+}
+
+impl PM1Status {
+    pub fn update(&mut self, event: PM1Event) {
+        match event {
+            PM1Event::Battery(b) => self.battery_percent = b,
+            PM1Event::PowerSwitch(b) => self.power_switch = b,
+            PM1Event::Physical(physical) => self.physical = physical,
+            PM1Event::Odometry(odometry) => self.odometry = odometry,
         }
     }
 }
