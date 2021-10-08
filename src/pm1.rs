@@ -57,7 +57,7 @@ pub struct PM1QuerySender {
 }
 
 #[derive(Clone)]
-pub struct PM1Interface {
+pub struct PM1Handle {
     status: Arc<RwLock<PM1Status>>,
     target: Weak<Mutex<(Instant, Physical)>>,
 }
@@ -123,7 +123,7 @@ impl Queries {
     }
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref QUERIES: Queries = Queries::new();
 }
 
@@ -163,8 +163,8 @@ impl PM1QuerySender {
 }
 
 impl PM1 {
-    pub fn get_interface(&self) -> PM1Interface {
-        PM1Interface {
+    pub fn get_handle(&self) -> PM1Handle {
+        PM1Handle {
             status: self.status.clone(),
             target: Arc::downgrade(&self.target),
         }
@@ -404,7 +404,7 @@ impl Iterator for PM1 {
     }
 }
 
-impl PM1Interface {
+impl PM1Handle {
     pub fn get(&self) -> PM1Status {
         *self.status.read().unwrap()
     }

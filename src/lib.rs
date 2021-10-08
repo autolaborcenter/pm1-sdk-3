@@ -6,9 +6,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[macro_use]
-extern crate lazy_static;
-
 pub mod pm1;
 
 pub struct PM1Threads;
