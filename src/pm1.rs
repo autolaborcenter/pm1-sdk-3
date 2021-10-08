@@ -10,6 +10,7 @@ use serial_port::{Port, SerialPort};
 use std::{
     collections::HashMap,
     f32::consts::FRAC_PI_2,
+    fmt::Display,
     sync::{Arc, Mutex, RwLock, Weak},
     time::{Duration, Instant},
 };
@@ -373,12 +374,14 @@ impl Iterator for PM1 {
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut time = Instant::now();
-        let deadline = time + MESSAGE_PARSE_TIMEOUT;
+        let mut deadline = time + MESSAGE_PARSE_TIMEOUT;
         loop {
             if let Some(msg) = self.buffer.next() {
                 // 成功从缓存中消费
                 if let Some(status) = self.receive(time, msg) {
                     return Some(status);
+                } else {
+                    deadline = time + MESSAGE_PARSE_TIMEOUT;
                 }
             } else if time > deadline {
                 // 解析已超时
@@ -419,6 +422,23 @@ impl PM1Interface {
 #[inline]
 const fn message(node_type: u8, node_index: u8, msg_type: u8, data_field: bool) -> Message {
     Message::new(0, data_field, 0, node_type, node_index, msg_type)
+}
+
+impl Display for PM1Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Battery: {}% | Speed: {}m/s | Rudder: {}rad{}",
+            self.battery_percent,
+            self.physical.speed,
+            self.physical.rudder,
+            if !self.power_switch {
+                " | Power Switch Off"
+            } else {
+                ""
+            }
+        )
+    }
 }
 
 pub mod node {
