@@ -1,0 +1,11 @@
+[package]
+name = "keyboard"
+version = "0.1.0"
+edition = "2021"
+authors = ["YdrMaster <ydrml@hotmail.com>"]
+readme = "README.md"
+
+[dependencies]
+pm1-sdk-3 = { path = "../.." }
+pm1-control-model = { path = "../../../pm1-control-model" }
+crossterm = "*"
