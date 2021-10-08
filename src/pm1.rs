@@ -127,8 +127,42 @@ impl DriverHandle for PM1Handle {
     }
 }
 
-impl Driver<PM1Status> for PM1 {
+impl Driver<Port, PM1Status> for PM1 {
+    type Pacemaker = PM1Pacemaker;
     type Handle = PM1Handle;
+
+    fn new(port: Port) -> (Self::Pacemaker, Self) {
+        let now = Instant::now();
+        let port = Arc::new(port);
+        let sender = PM1Pacemaker {
+            port: Arc::downgrade(&port),
+
+            next: now,
+            index: 0,
+        };
+        sender.send_len(5);
+        (
+            sender,
+            PM1 {
+                port,
+                buffer: Default::default(),
+
+                using_pad: now,
+                state_memory: HashMap::new(),
+                status: PM1Status {
+                    battery_percent: 0,
+                    power_switch: false,
+                    physical: Physical::RELEASED,
+                    odometry: Odometry::ZERO,
+                },
+                target: Arc::new(Mutex::new((now, Physical::RELEASED))),
+
+                differential: Differential::new(),
+                model: Default::default(),
+                optimizer: Optimizer::new(0.5, 1.2, CONTROL_PERIOD),
+            },
+        )
+    }
 
     fn handle(&self) -> Self::Handle {
         PM1Handle(Arc::downgrade(&self.target))
@@ -137,39 +171,6 @@ impl Driver<PM1Status> for PM1 {
     fn status(&self) -> PM1Status {
         self.status
     }
-}
-
-pub fn pm1(port: Port) -> (PM1Pacemaker, PM1) {
-    let now = Instant::now();
-    let port = Arc::new(port);
-    let sender = PM1Pacemaker {
-        port: Arc::downgrade(&port),
-
-        next: now,
-        index: 0,
-    };
-    sender.send_len(5);
-    (
-        sender,
-        PM1 {
-            port,
-            buffer: Default::default(),
-
-            using_pad: now,
-            state_memory: HashMap::new(),
-            status: PM1Status {
-                battery_percent: 0,
-                power_switch: false,
-                physical: Physical::RELEASED,
-                odometry: Odometry::ZERO,
-            },
-            target: Arc::new(Mutex::new((now, Physical::RELEASED))),
-
-            differential: Differential::new(),
-            model: Default::default(),
-            optimizer: Optimizer::new(0.5, 1.2, CONTROL_PERIOD),
-        },
-    )
 }
 
 struct Queries([u8; 30]);
