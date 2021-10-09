@@ -115,43 +115,48 @@ impl DriverPacemaker for PM1Pacemaker {
     }
 }
 
-impl Driver<Port> for PM1 {
+impl Driver<String> for PM1 {
     type Pacemaker = PM1Pacemaker;
     type Status = PM1Status;
     type Command = Physical;
 
-    fn new(port: Port) -> (Self::Pacemaker, Self) {
-        let now = Instant::now();
-        let port = Arc::new(port);
-        let sender = PM1Pacemaker {
-            port: Arc::downgrade(&port),
+    fn new(name: String) -> Option<(Self::Pacemaker, Self)> {
+        match Port::open(name.as_str(), 115200, 200) {
+            Ok(port) => {
+                let now = Instant::now();
+                let port = Arc::new(port);
+                let sender = PM1Pacemaker {
+                    port: Arc::downgrade(&port),
 
-            next: now,
-            index: 0,
-        };
-        sender.send_len(5);
-        (
-            sender,
-            PM1 {
-                port,
-                buffer: Default::default(),
-                last_time: now,
+                    next: now,
+                    index: 0,
+                };
+                sender.send_len(5);
+                Some((
+                    sender,
+                    PM1 {
+                        port,
+                        buffer: Default::default(),
+                        last_time: now,
 
-                using_pad: now,
-                state_memory: HashMap::new(),
-                status: PM1Status {
-                    battery_percent: 0,
-                    power_switch: false,
-                    physical: Physical::RELEASED,
-                    odometry: Odometry::ZERO,
-                },
-                target: (now, Physical::RELEASED),
+                        using_pad: now,
+                        state_memory: HashMap::new(),
+                        status: PM1Status {
+                            battery_percent: 0,
+                            power_switch: false,
+                            physical: Physical::RELEASED,
+                            odometry: Odometry::ZERO,
+                        },
+                        target: (now, Physical::RELEASED),
 
-                differential: Differential::new(),
-                model: Default::default(),
-                optimizer: Optimizer::new(0.5, 1.2, CONTROL_PERIOD),
-            },
-        )
+                        differential: Differential::new(),
+                        model: Default::default(),
+                        optimizer: Optimizer::new(0.5, 1.2, CONTROL_PERIOD),
+                    },
+                ))
+            }
+            Err(_) => None,
+        }
     }
 
     fn status(&self) -> PM1Status {

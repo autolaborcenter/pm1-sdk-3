@@ -1,14 +1,22 @@
-﻿use driver::{Driver, Module};
-use pm1_sdk::PM1Threads;
+﻿use driver::{Driver, SupersivorEventForSingle::*, SupervisorForSingle};
+use pm1_sdk::PM1Supervisor;
+use std::{thread, time::Duration};
 
 fn main() {
-    if let Some(mut chassis) = PM1Threads::open_all(1).into_iter().next() {
-        println!("{}", chassis.status());
-        while chassis.join(|_, event| {
-            if let Some(e) = event {
-                println!("{:?}", e);
+    PM1Supervisor::new().join(|e| {
+        match e {
+            Connected(driver) => println!("Connected: {}", driver.status()),
+            ConnectFailed => {
+                println!("Failed.");
+                thread::sleep(Duration::from_secs(1));
             }
-            true
-        }) {}
-    }
+            Disconnected => {
+                println!("Disconnected.");
+                thread::sleep(Duration::from_secs(1));
+            }
+            Event(_, Some((_, event))) => println!("Event: {:?}", event),
+            Event(_, None) => {}
+        };
+        true
+    });
 }
