@@ -158,25 +158,24 @@ impl Driver<Port> for PM1 {
         self.status
     }
 
-    fn send(&mut self, command: Self::Command) {
-        self.target = (Instant::now() + TARGET_MEMORY_TIMEOUT, command);
+    fn send(&mut self, command: (Instant, Self::Command)) {
+        self.target = (command.0 + TARGET_MEMORY_TIMEOUT, command.1);
     }
 
-    fn wait<F>(&mut self, f: F) -> bool
+    fn join<F>(&mut self, mut f: F) -> bool
     where
-        F: FnOnce(&mut Self, Instant, <Self::Status as DriverStatus>::Event),
+        F: FnMut(&mut Self, Option<(Instant, <Self::Status as DriverStatus>::Event)>) -> bool,
     {
-        let mut deadline = Instant::now() + MESSAGE_PARSE_TIMEOUT;
+        let mut time = Instant::now();
         loop {
             if let Some(msg) = self.buffer.next() {
                 // 成功从缓存中消费
-                if let Some(event) = self.receive(self.last_time, msg) {
-                    // 判断外部有无新的指令
-                    let time = self.last_time;
-                    f(self, time, event);
+                let event = self.receive(self.last_time, msg);
+                if !f(self, event) {
+                    // 如果回调指示不要继续阻塞，立即退出
                     return true;
                 }
-            } else if self.last_time > deadline {
+            } else if self.last_time > time + MESSAGE_PARSE_TIMEOUT {
                 // 解析超时
                 return false;
             } else {
@@ -186,11 +185,12 @@ impl Driver<Port> for PM1 {
                     Some(n) => {
                         if n == 0 {
                             // 串口超时
+                            println!("1");
                             return false;
                         } else {
                             // 成功接收
                             self.last_time = Instant::now();
-                            deadline = self.last_time + MESSAGE_PARSE_TIMEOUT;
+                            time = self.last_time;
                             self.buffer.notify_received(n);
                         }
                     }
@@ -358,7 +358,7 @@ impl PM1 {
         }
     }
 
-    fn receive(&mut self, time: Instant, msg: Message) -> Option<PM1Event> {
+    fn receive(&mut self, time: Instant, msg: Message) -> Option<(Instant, PM1Event)> {
         let header = msg.header();
         let data = header.data_field();
         let t_node = header.node_type();
@@ -390,6 +390,7 @@ impl PM1 {
                     vcu::BATTERY_PERCENT => {
                         if data {
                             self.update_battery_percent(unsafe { msg.read().read_unchecked() })
+                                .and_then(|e| Some((time, e)))
                         } else {
                             None
                         }
@@ -399,6 +400,7 @@ impl PM1 {
                     vcu::POWER_SWITCH => {
                         if data {
                             self.update_power_switch(unsafe { msg.read().read_unchecked() })
+                                .and_then(|e| Some((time, e)))
                         } else {
                             None
                         }
@@ -422,6 +424,7 @@ impl PM1 {
                             self.update_odometry(time, header.node_index(), unsafe {
                                 msg.read().read_unchecked()
                             })
+                            .and_then(|e| Some((time, e)))
                         } else {
                             None
                         }
@@ -442,6 +445,7 @@ impl PM1 {
                     tcu::CURRENT_POSITION => {
                         if data {
                             self.update_rudder(time, unsafe { msg.read().read_unchecked() })
+                                .and_then(|e| Some((time, e)))
                         } else {
                             // VCU 询问 TCU
                             self.detect_control_pad(time);
