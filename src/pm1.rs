@@ -169,6 +169,7 @@ impl Driver<Port> for PM1 {
         let mut time = Instant::now();
         loop {
             if let Some(msg) = self.buffer.next() {
+                time = self.last_time;
                 // 成功从缓存中消费
                 let event = self.receive(self.last_time, msg);
                 if !f(self, event) {
@@ -185,12 +186,10 @@ impl Driver<Port> for PM1 {
                     Some(n) => {
                         if n == 0 {
                             // 串口超时
-                            println!("1");
                             return false;
                         } else {
                             // 成功接收
                             self.last_time = Instant::now();
-                            time = self.last_time;
                             self.buffer.notify_received(n);
                         }
                     }
