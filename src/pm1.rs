@@ -1,4 +1,5 @@
-﻿use pm1_control_model::{
+﻿use driver::{Driver, DriverPacemaker, DriverStatus};
+use pm1_control_model::{
     model::ChassisModel,
     motor::{RUDDER, WHEEL},
     optimizer::Optimizer,
@@ -18,7 +19,6 @@ pub mod odometry;
 
 use self::{node::*, odometry::Odometry};
 use autocan::{Message, MessageBuffer};
-use driver::{Driver, DriverHandle, DriverPacemaker, DriverStatus};
 use odometry::Differential;
 
 const CONTROL_PERIOD: Duration = Duration::from_millis(40); // 控制周期
@@ -36,11 +36,12 @@ const MESSAGE_PARSE_TIMEOUT: Duration = Duration::from_millis(250); // 超时认
 pub struct PM1 {
     port: Arc<Port>,
     buffer: MessageBuffer<32>,
+    last_time: Instant,
 
     using_pad: Instant,
     state_memory: HashMap<(u8, u8), u8>,
     status: PM1Status,
-    target: Arc<Mutex<(Instant, Physical)>>,
+    target: (Instant, Physical),
 
     differential: Differential,
     model: ChassisModel,
@@ -114,22 +115,10 @@ impl DriverPacemaker for PM1Pacemaker {
     }
 }
 
-impl DriverHandle for PM1Handle {
-    type Command = Physical;
-
-    fn send(&self, command: Self::Command) -> bool {
-        if let Some(mutex) = self.0.upgrade() {
-            *mutex.lock().unwrap() = (Instant::now() + TARGET_MEMORY_TIMEOUT, command);
-            true
-        } else {
-            false
-        }
-    }
-}
-
-impl Driver<Port, PM1Status> for PM1 {
+impl Driver<Port> for PM1 {
     type Pacemaker = PM1Pacemaker;
-    type Handle = PM1Handle;
+    type Status = PM1Status;
+    type Command = Physical;
 
     fn new(port: Port) -> (Self::Pacemaker, Self) {
         let now = Instant::now();
@@ -146,6 +135,7 @@ impl Driver<Port, PM1Status> for PM1 {
             PM1 {
                 port,
                 buffer: Default::default(),
+                last_time: now,
 
                 using_pad: now,
                 state_memory: HashMap::new(),
@@ -155,7 +145,7 @@ impl Driver<Port, PM1Status> for PM1 {
                     physical: Physical::RELEASED,
                     odometry: Odometry::ZERO,
                 },
-                target: Arc::new(Mutex::new((now, Physical::RELEASED))),
+                target: (now, Physical::RELEASED),
 
                 differential: Differential::new(),
                 model: Default::default(),
@@ -164,12 +154,51 @@ impl Driver<Port, PM1Status> for PM1 {
         )
     }
 
-    fn handle(&self) -> Self::Handle {
-        PM1Handle(Arc::downgrade(&self.target))
-    }
-
     fn status(&self) -> PM1Status {
         self.status
+    }
+
+    fn send(&mut self, command: Self::Command) {
+        self.target = (Instant::now() + TARGET_MEMORY_TIMEOUT, command);
+    }
+
+    fn wait<F>(&mut self, f: F) -> bool
+    where
+        F: FnOnce(&mut Self, Instant, <Self::Status as DriverStatus>::Event),
+    {
+        let mut deadline = Instant::now() + MESSAGE_PARSE_TIMEOUT;
+        loop {
+            if let Some(msg) = self.buffer.next() {
+                // 成功从缓存中消费
+                if let Some(event) = self.receive(self.last_time, msg) {
+                    // 判断外部有无新的指令
+                    let time = self.last_time;
+                    f(self, time, event);
+                    return true;
+                }
+            } else if self.last_time > deadline {
+                // 解析超时
+                return false;
+            } else {
+                // 重新接收
+                match self.port.read(self.buffer.as_buf()) {
+                    // 成功接收
+                    Some(n) => {
+                        if n == 0 {
+                            // 串口超时
+                            return false;
+                        } else {
+                            // 成功接收
+                            self.last_time = Instant::now();
+                            deadline = self.last_time + MESSAGE_PARSE_TIMEOUT;
+                            self.buffer.notify_received(n);
+                        }
+                    }
+                    // 无法接收
+                    None => return false,
+                };
+            }
+        }
     }
 }
 
@@ -266,8 +295,7 @@ impl PM1 {
         };
         // 正在使用遥控器，跳过控制
         let target = if time > self.using_pad + PAD_CONTROL_TIMEOUT {
-            let mut guard = self.target.lock().unwrap();
-            let (deadline, physical) = *guard;
+            let (deadline, physical) = self.target;
             if time >= deadline {
                 // 距离上次接收已经超时
                 if current.speed == 0.0 {
@@ -277,7 +305,7 @@ impl PM1 {
                 }
             } else if !self.status.power_switch {
                 // 急停按开关断开
-                *guard = (time, Physical::RELEASED);
+                self.target = (time, Physical::RELEASED);
                 None
             } else {
                 Some(physical)
@@ -426,41 +454,6 @@ impl PM1 {
                 // 其他，不需要解析
                 _ => None,
             },
-        }
-    }
-}
-
-impl Iterator for PM1 {
-    type Item = (Instant, PM1Event);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut time = Instant::now();
-        let mut deadline = time + MESSAGE_PARSE_TIMEOUT;
-        loop {
-            if let Some(msg) = self.buffer.next() {
-                // 成功从缓存中消费
-                if let Some(status) = self.receive(time, msg) {
-                    return Some((time, status));
-                } else {
-                    deadline = time + MESSAGE_PARSE_TIMEOUT;
-                }
-            } else if time > deadline {
-                // 解析已超时
-                return None;
-            } else {
-                // 重新接收
-                match self.port.read(self.buffer.as_buf()) {
-                    Some(n) => {
-                        if n == 0 {
-                            return None;
-                        } else {
-                            time = Instant::now();
-                            self.buffer.notify_received(n);
-                        }
-                    }
-                    None => return None,
-                };
-            }
         }
     }
 }
