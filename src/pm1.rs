@@ -24,6 +24,7 @@ use odometry::Differential;
 const CONTROL_PERIOD: Duration = Duration::from_millis(40); // 控制周期
 const TARGET_MEMORY_TIMEOUT: Duration = Duration::from_millis(200); // 超时则将目标改为停止
 const PAD_CONTROL_TIMEOUT: Duration = Duration::from_millis(200); // 在此保护时间内不进行控制
+const MESSAGE_RECEIVE_TIMEOUT: Duration = Duration::from_millis(200); // 超时认为底盘已断开，立即退出
 const MESSAGE_PARSE_TIMEOUT: Duration = Duration::from_millis(250); // 超时认为底盘已断开，立即退出
 
 /// 保存底盘状态的结构体。
@@ -121,7 +122,11 @@ impl Driver<String> for PM1 {
     type Command = Physical;
 
     fn new(name: String) -> Option<(Self::Pacemaker, Self)> {
-        match Port::open(name.as_str(), 115200, 200) {
+        match Port::open(
+            name.as_str(),
+            115200,
+            MESSAGE_RECEIVE_TIMEOUT.as_millis() as u32,
+        ) {
             Ok(port) => {
                 let now = Instant::now();
                 let port = Arc::new(port);
@@ -159,8 +164,8 @@ impl Driver<String> for PM1 {
         }
     }
 
-    fn status(&self) -> PM1Status {
-        self.status
+    fn status<'a>(&'a self) -> &'a PM1Status {
+        &self.status
     }
 
     fn send(&mut self, command: (Instant, Self::Command)) {
@@ -176,7 +181,7 @@ impl Driver<String> for PM1 {
             if let Some(msg) = self.buffer.next() {
                 time = self.last_time;
                 // 成功从缓存中消费
-                let event = self.receive(self.last_time, msg);
+                let event = self.receive(time, msg);
                 if !f(self, event) {
                     // 如果回调指示不要继续阻塞，立即退出
                     return true;
