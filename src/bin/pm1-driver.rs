@@ -5,7 +5,7 @@ use std::{thread, time::Duration};
 fn main() {
     PM1Supervisor::new().join(|e| {
         match e {
-            Connected(driver) => println!("Connected: {}", driver.status()),
+            Connected(_, driver) => println!("Connected: {}", driver.status()),
             ConnectFailed => {
                 println!("Failed.");
                 thread::sleep(Duration::from_secs(1));

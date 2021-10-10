@@ -121,7 +121,7 @@ impl Driver<String> for PM1 {
     type Status = PM1Status;
     type Command = Physical;
 
-    fn new(name: String) -> Option<(Self::Pacemaker, Self)> {
+    fn new(name: &String) -> Option<(Self::Pacemaker, Self)> {
         match Port::open(
             name.as_str(),
             115200,
