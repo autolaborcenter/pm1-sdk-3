@@ -1,10 +1,5 @@
 use driver::{Driver, DriverPacemaker};
-use pm1_control_model::{
-    model::ChassisModel,
-    motor::{RUDDER, WHEEL},
-    optimizer::Optimizer,
-    Physical, Wheels,
-};
+use pm1_control_model::{ChassisModel, Motor, Odometry, Optimizer, Physical, Predictor, Wheels};
 use serial_port::{Port, SerialPort};
 use std::{
     collections::HashMap,
@@ -15,11 +10,11 @@ use std::{
 };
 
 mod autocan;
-pub mod odometry;
+mod differential;
 
-use self::{node::*, odometry::Odometry};
+use self::node::*;
 use autocan::{Message, MessageBuffer};
-use odometry::Differential;
+use differential::Differential;
 
 const CONTROL_PERIOD: Duration = Duration::from_millis(40); // 控制周期
 const TARGET_MEMORY_TIMEOUT: Duration = Duration::from_millis(200); // 超时则将目标改为停止
@@ -107,6 +102,15 @@ impl DriverPacemaker for PM1Pacemaker {
 impl PM1 {
     pub fn status<'a>(&'a self) -> &'a PM1Status {
         &self.status
+    }
+
+    pub fn predict(&self) -> Predictor {
+        Predictor {
+            delta_rudder: 1.0 * CONTROL_PERIOD.as_secs_f32(),
+            optimizer: self.optimizer,
+            current: self.status.physical,
+            target: self.target.1,
+        }
     }
 }
 
@@ -289,13 +293,18 @@ impl PM1 {
 
     fn update_odometry(&mut self, time: Instant, which: u8, value: i32) -> Option<PM1Event> {
         if let Some((dl, dr)) = self.differential.update(time, which, value) {
-            let (s, a) = self
-                .model
-                .wheels_rad_to_delta((WHEEL.pluses_to_rad(dl), WHEEL.pluses_to_rad(dr)));
-            if s == 0.0 && a == 0.0 {
+            const ZERO: Wheels = Wheels {
+                left: 0.0,
+                right: 0.0,
+            };
+            let wheels = Wheels {
+                left: Motor::WHEEL.pluses_to_rad(dl),
+                right: Motor::WHEEL.pluses_to_rad(dr),
+            };
+            if wheels == ZERO {
                 None
             } else {
-                self.status.odometry += Odometry::from_delta(s, a);
+                self.status.odometry += self.model.wheels_to_odometry(wheels);
                 Some(PM1Event::Odometry(self.status.odometry))
             }
         } else {
@@ -304,7 +313,7 @@ impl PM1 {
     }
 
     fn update_rudder(&mut self, time: Instant, rudder: i16) -> Option<PM1Event> {
-        let rudder = RUDDER.pluses_to_rad(rudder.into());
+        let rudder = Motor::RUDDER.pluses_to_rad(rudder.into());
         let mut current = self.status.physical;
         // 更新状态
         current.rudder = if rudder > FRAC_PI_2 {
@@ -354,11 +363,15 @@ impl PM1 {
 
                 let mut msg = MSG;
                 // 控制
-                msg[1].write().write_unchecked(WHEEL.rad_to_pulses(l));
-                msg[2].write().write_unchecked(WHEEL.rad_to_pulses(r));
+                msg[1]
+                    .write()
+                    .write_unchecked(Motor::WHEEL.rad_to_pulses(l));
+                msg[2]
+                    .write()
+                    .write_unchecked(Motor::WHEEL.rad_to_pulses(r));
                 msg[3]
                     .write()
-                    .write_unchecked(RUDDER.rad_to_pulses(target.rudder) as i16);
+                    .write_unchecked(Motor::RUDDER.rad_to_pulses(target.rudder) as i16);
                 // 解锁
                 let msg = if self.state_memory.iter().any(|(_, s)| *s == 0xff) {
                     msg[0].write().write_unchecked(0xff as u8);

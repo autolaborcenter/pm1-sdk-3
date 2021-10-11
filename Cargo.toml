@@ -9,5 +9,4 @@ readme = "README.md"
 driver = { path = "../driver" }
 pm1-control-model = { path = "../pm1-control-model" }
 serial-port = { path = "../serial-port" }
-nalgebra = "*"
 lazy_static = "*"
