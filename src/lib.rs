@@ -1,4 +1,4 @@
-use driver::{Driver, DriverPacemaker, DriverStatus};
+use driver::{Driver, DriverPacemaker};
 use pm1_control_model::{
     model::ChassisModel,
     motor::{RUDDER, WHEEL},
@@ -76,19 +76,6 @@ pub enum PM1Event {
     Odometry(Odometry),
 }
 
-impl DriverStatus for PM1Status {
-    type Event = PM1Event;
-
-    fn update(&mut self, event: Self::Event) {
-        match event {
-            PM1Event::Battery(b) => self.battery_percent = b,
-            PM1Event::PowerSwitch(b) => self.power_switch = b,
-            PM1Event::Physical(physical) => self.physical = physical,
-            PM1Event::Odometry(odometry) => self.odometry = odometry,
-        }
-    }
-}
-
 impl DriverPacemaker for PM1Pacemaker {
     fn period() -> Duration {
         CONTROL_PERIOD
@@ -117,9 +104,16 @@ impl DriverPacemaker for PM1Pacemaker {
     }
 }
 
-impl Driver<String> for PM1 {
+impl PM1 {
+    pub fn status<'a>(&'a self) -> &'a PM1Status {
+        &self.status
+    }
+}
+
+impl Driver for PM1 {
+    type Key = String;
     type Pacemaker = PM1Pacemaker;
-    type Status = PM1Status;
+    type Event = PM1Event;
     type Command = Physical;
 
     fn keys() -> Vec<String> {
@@ -186,17 +180,13 @@ impl Driver<String> for PM1 {
         }
     }
 
-    fn status<'a>(&'a self) -> &'a PM1Status {
-        &self.status
-    }
-
     fn send(&mut self, command: (Instant, Self::Command)) {
         self.target = (command.0 + TARGET_MEMORY_TIMEOUT, command.1);
     }
 
     fn join<F>(&mut self, mut f: F) -> bool
     where
-        F: FnMut(&mut Self, Option<(Instant, <Self::Status as DriverStatus>::Event)>) -> bool,
+        F: FnMut(&mut Self, Option<(Instant, Self::Event)>) -> bool,
     {
         let mut time = Instant::now();
         loop {

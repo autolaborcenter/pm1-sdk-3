@@ -1,8 +1,9 @@
-﻿use driver::{Driver, SupersivorEventForSingle::*, SupervisorForSingle};
+﻿use driver::{SupersivorEventForSingle::*, SupervisorForSingle};
+use pm1_sdk::PM1;
 use std::{thread::sleep, time::Duration};
 
 fn main() {
-    SupervisorForSingle::<String, pm1_sdk::PM1>::new().join(|e| {
+    SupervisorForSingle::<PM1>::new().join(|e| {
         match e {
             Connected(_, driver) => println!("Connected: {}", driver.status()),
             ConnectFailed => {
