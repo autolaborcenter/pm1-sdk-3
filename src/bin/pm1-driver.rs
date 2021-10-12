@@ -14,7 +14,7 @@ enum Request {
 }
 
 fn main() {
-    let (sender, receiver) = sync_channel(0);
+    let (sender, receiver) = channel();
 
     thread::spawn(move || {
         SupervisorForSingle::<PM1>::new().join(|e| {
@@ -45,18 +45,19 @@ fn main() {
                         let mut pose = Odometry::ZERO;
                         let (model, mut predictor) = pm1.predict();
                         predictor.set_target(p);
+                        print!("P {}|{}", p.speed, p.rudder);
                         for _ in 0..20 {
                             for _ in 0..5 {
                                 match predictor.next() {
                                     Some(s) => {
                                         pose += model.physical_to_odometry(Physical {
-                                            speed: s.speed * 0.04,
+                                            speed: s.speed * 0.02,
                                             ..s
                                         });
                                     }
                                     None => {
                                         pose += model.physical_to_odometry(Physical {
-                                            speed: p.speed * 0.04,
+                                            speed: p.speed * 0.02,
                                             ..p
                                         });
                                     }
@@ -64,8 +65,8 @@ fn main() {
                             }
                             print!(
                                 " {},{},{}",
-                                pose.pose.translation.vector[0],
-                                pose.pose.translation.vector[1],
+                                (pose.pose.translation.vector[0] * 1000.0) as u32,
+                                (pose.pose.translation.vector[1] * 1000.0) as u32,
                                 pose.pose.rotation.angle()
                             );
                         }
