@@ -120,7 +120,7 @@ impl Driver for PM1 {
     type Event = PM1Event;
     type Command = Physical;
 
-    fn keys() -> Vec<PortKey> {
+    fn keys() -> Vec<Self::Key> {
         Port::list().into_iter().map(|id| id.key).collect()
     }
 
@@ -128,7 +128,7 @@ impl Driver for PM1 {
         OPEN_TIMEOUT
     }
 
-    fn new(key: &PortKey) -> Option<(Self::Pacemaker, Self)> {
+    fn new(key: &Self::Key) -> Option<(Self::Pacemaker, Self)> {
         match Port::open(key, 115200, MESSAGE_RECEIVE_TIMEOUT.as_millis() as u32) {
             Ok(port) => {
                 let now = Instant::now();
