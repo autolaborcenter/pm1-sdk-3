@@ -118,7 +118,7 @@ impl Driver for PM1 {
     type Key = PortKey;
     type Pacemaker = PM1Pacemaker;
     type Event = PM1Event;
-    type Command = Physical;
+    type Command = (Instant, Physical);
 
     fn keys() -> Vec<Self::Key> {
         Port::list().into_iter().map(|id| id.key).collect()
@@ -167,7 +167,7 @@ impl Driver for PM1 {
         }
     }
 
-    fn send(&mut self, command: (Instant, Self::Command)) {
+    fn send(&mut self, command: Self::Command) {
         self.target = (command.0 + TARGET_MEMORY_TIMEOUT, command.1);
     }
 
