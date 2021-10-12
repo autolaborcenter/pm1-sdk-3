@@ -47,10 +47,10 @@ pub struct PM1 {
 
 #[derive(Clone, Copy)]
 pub struct PM1Status {
-    battery_percent: u8,
-    power_switch: bool,
-    physical: Physical,
-    odometry: Odometry,
+    pub battery_percent: u8,
+    pub power_switch: bool,
+    pub physical: Physical,
+    pub odometry: Odometry,
 }
 
 pub struct PM1Pacemaker {
@@ -104,13 +104,16 @@ impl PM1 {
         &self.status
     }
 
-    pub fn predict(&self) -> Predictor {
-        Predictor {
-            delta_rudder: 1.0 * CONTROL_PERIOD.as_secs_f32(),
-            optimizer: self.optimizer,
-            current: self.status.physical,
-            target: self.target.1,
-        }
+    pub fn predict(&self) -> (ChassisModel, Predictor) {
+        (
+            self.model.clone(),
+            Predictor {
+                delta_rudder: 1.0 * CONTROL_PERIOD.as_secs_f32(),
+                optimizer: self.optimizer,
+                current: self.status.physical,
+                target: self.target.1,
+            },
+        )
     }
 }
 
