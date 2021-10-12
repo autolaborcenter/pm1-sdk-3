@@ -1,6 +1,6 @@
 use driver::{Driver, DriverPacemaker};
 use pm1_control_model::{ChassisModel, Motor, Odometry, Optimizer, Physical, Predictor, Wheels};
-use serial_port::{Port, SerialPort};
+use serial_port::{Port, PortKey, SerialPort};
 use std::{
     collections::HashMap,
     f32::consts::FRAC_PI_2,
@@ -115,38 +115,21 @@ impl PM1 {
 }
 
 impl Driver for PM1 {
-    type Key = String;
+    type Key = PortKey;
     type Pacemaker = PM1Pacemaker;
     type Event = PM1Event;
     type Command = Physical;
 
-    fn keys() -> Vec<String> {
-        Port::list()
-            .into_iter()
-            .map(|name| {
-                if cfg!(target_os = "windows") {
-                    name.rmatch_indices("COM")
-                        .next()
-                        .map(|m| &name.as_str()[m.0..name.len() - 1])
-                        .unwrap()
-                        .into()
-                } else {
-                    name
-                }
-            })
-            .collect()
+    fn keys() -> Vec<PortKey> {
+        Port::list().into_iter().map(|id| id.key).collect()
     }
 
     fn open_timeout() -> Duration {
         OPEN_TIMEOUT
     }
 
-    fn new(name: &String) -> Option<(Self::Pacemaker, Self)> {
-        match Port::open(
-            name.as_str(),
-            115200,
-            MESSAGE_RECEIVE_TIMEOUT.as_millis() as u32,
-        ) {
+    fn new(key: &PortKey) -> Option<(Self::Pacemaker, Self)> {
+        match Port::open(key, 115200, MESSAGE_RECEIVE_TIMEOUT.as_millis() as u32) {
             Ok(port) => {
                 let now = Instant::now();
                 let port = Arc::new(port);
