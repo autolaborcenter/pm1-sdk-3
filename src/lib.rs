@@ -53,7 +53,6 @@ pub struct PM1Status {
     pub battery_percent: u8,
     pub power_switch: bool,
     pub physical: Physical,
-    pub odometry: Odometry,
 }
 
 pub struct PM1Pacemaker {
@@ -159,7 +158,6 @@ impl Driver for PM1 {
                             battery_percent: 0,
                             power_switch: false,
                             physical: Physical::RELEASED,
-                            odometry: Odometry::ZERO,
                         },
                         target: (now, Physical::RELEASED),
 
@@ -293,8 +291,7 @@ impl PM1 {
             if wheels == ZERO {
                 None
             } else {
-                self.status.odometry += self.model.wheels_to_odometry(wheels);
-                Some(PM1Event::Odometry(self.status.odometry))
+                Some(PM1Event::Odometry(self.model.wheels_to_odometry(wheels)))
             }
         } else {
             None
