@@ -106,16 +106,24 @@ impl PM1 {
         &self.status
     }
 
-    pub fn predict(&self) -> (ChassisModel, Predictor) {
+    pub fn drive(&mut self, target: Physical) {
+        self.send((Instant::now(), target));
+    }
+
+    pub fn predict_with(&self, target: Physical) -> (ChassisModel, Predictor) {
         (
             self.model.clone(),
             Predictor {
                 delta_rudder: 1.0 * CONTROL_PERIOD.as_secs_f32(),
                 optimizer: self.optimizer,
                 current: self.status.physical,
-                target: self.target.1,
+                target,
             },
         )
+    }
+
+    pub fn predict(&self) -> (ChassisModel, Predictor) {
+        self.predict_with(self.target.1)
     }
 }
 
