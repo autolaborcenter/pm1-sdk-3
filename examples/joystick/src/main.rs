@@ -20,9 +20,8 @@ fn main() {
             loop {
                 let (duration, event) = joystick.read();
                 if let Some((x, y)) = event {
-                    let (x, y) = map((x as f32) / 32768.0 - 1.0, 1.0 - (y as f32) / 32768.0);
                     let mut p = Physical {
-                        speed: x.hypot(y),
+                        speed: f32::max(x.abs(), y.abs()),
                         rudder: x.atan2(y.abs()),
                     };
                     if y < 0.0 {
@@ -30,7 +29,7 @@ fn main() {
                     }
                     let now = Instant::now();
                     *target.lock().unwrap() = (now, p);
-                    println!("{:.3} {:.3} {:?}", x, y, p);
+                    println!("{} {} {:?}", x, y, p);
                 }
                 thread::sleep(duration);
             }
@@ -43,12 +42,4 @@ fn main() {
         };
         true
     });
-}
-
-fn map(x: f32, y: f32) -> (f32, f32) {
-    if x.abs() > y.abs() {
-        (x.signum() * f32::min(x.abs(), (1.0 - y * y).sqrt()), y)
-    } else {
-        (x, y.signum() * f32::min(y.abs(), (1.0 - x * x).sqrt()))
-    }
 }
