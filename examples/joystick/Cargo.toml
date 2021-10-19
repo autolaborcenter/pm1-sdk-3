@@ -8,3 +8,4 @@ readme = "README.md"
 [dependencies]
 pm1-sdk = { path = "../../" }
 joystick-win = { path = "../../../joystick-win" }
+async-std = "*"
