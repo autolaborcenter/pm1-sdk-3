@@ -1,5 +1,5 @@
 use driver::{Driver, DriverPacemaker};
-use pm1_control_model::{ChassisModel, Motor, Odometry, Optimizer, Physical, Predictor, Wheels};
+use pm1_control_model::{ChassisModel, Motor, Odometry, Optimizer, Physical, Wheels};
 use serial_port::{Port, PortKey, SerialPort};
 use std::{
     collections::HashMap,
@@ -20,6 +20,7 @@ pub extern crate driver;
 pub extern crate pm1_control_model as model;
 
 pub const CONTROL_PERIOD: Duration = Duration::from_millis(40); // 控制周期
+pub const RUDDER_STEP: f32 = 0.04; // 每个周期的后轮转角
 const TARGET_MEMORY_TIMEOUT: Duration = Duration::from_millis(200); // 超时则将目标改为停止
 const PAD_CONTROL_TIMEOUT: Duration = Duration::from_millis(200); // 在此保护时间内不进行控制
 const MESSAGE_RECEIVE_TIMEOUT: Duration = Duration::from_millis(200); // 超时认为底盘已断开，立即退出
@@ -110,20 +111,8 @@ impl PM1 {
         self.send((Instant::now(), target));
     }
 
-    pub fn predict_with(&self, target: Physical) -> (ChassisModel, Predictor) {
-        (
-            self.model.clone(),
-            Predictor {
-                delta_rudder: 1.0 * CONTROL_PERIOD.as_secs_f32(),
-                optimizer: self.optimizer,
-                current: self.status.physical,
-                target,
-            },
-        )
-    }
-
-    pub fn predict(&self) -> (ChassisModel, Predictor) {
-        self.predict_with(self.target.1)
+    pub fn predictor(&self) -> (ChassisModel, Optimizer) {
+        (self.model.clone(), self.optimizer)
     }
 }
 
