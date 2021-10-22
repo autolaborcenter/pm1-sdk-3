@@ -6,7 +6,7 @@ use pm1_sdk::{
 };
 use std::{
     cmp,
-    f32::consts::{FRAC_PI_2, FRAC_PI_4},
+    f32::consts::{FRAC_PI_2, FRAC_PI_6},
 };
 
 fn main() {
@@ -25,10 +25,13 @@ fn main() {
                         _ => {}
                     }
                 }
-                driver.drive(match active_gamepad {
+                let mut target = match active_gamepad {
                     Some(id) => map(&gilrs.gamepad(id)),
                     None => Physical::RELEASED,
-                });
+                };
+                target.speed *= gear as f32 / 5.0;
+                println!("{:?}", target);
+                driver.drive(target);
             }
             _ => {}
         }
@@ -119,19 +122,19 @@ fn button(y: i8, x: i8) -> Physical {
         },
         (1, 1) => Physical {
             speed: 1.0,
-            rudder: -FRAC_PI_4,
+            rudder: -FRAC_PI_6,
         },
         (1, -1) => Physical {
             speed: 1.0,
-            rudder: FRAC_PI_4,
+            rudder: FRAC_PI_6,
         },
         (-1, 1) => Physical {
             speed: -1.0,
-            rudder: -FRAC_PI_4,
+            rudder: -FRAC_PI_6,
         },
         (-1, -1) => Physical {
             speed: -1.0,
-            rudder: FRAC_PI_4,
+            rudder: FRAC_PI_6,
         },
         _ => panic!("Impossible!"),
     }
