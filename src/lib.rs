@@ -111,8 +111,18 @@ impl PM1 {
         self.send((Instant::now(), target));
     }
 
-    pub fn predictor(&self) -> (ChassisModel, Optimizer) {
-        (self.model.clone(), self.optimizer)
+    #[cfg(feature = "predict")]
+    pub fn status_predictor(&self) -> model::StatusPredictor {
+        model::StatusPredictor::new(self.optimizer, CONTROL_PERIOD)
+    }
+
+    #[cfg(feature = "predict")]
+    pub fn trajectory_predictor(&self) -> model::TrajectoryPredictor {
+        model::TrajectoryPredictor {
+            period: CONTROL_PERIOD,
+            model: self.model.clone(),
+            predictor: self.status_predictor(),
+        }
     }
 }
 
