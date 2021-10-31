@@ -20,7 +20,6 @@ pub extern crate driver;
 pub extern crate pm1_control_model as model;
 
 pub const CONTROL_PERIOD: Duration = Duration::from_millis(40); // 控制周期
-pub const RUDDER_STEP: f32 = 0.04; // 每个周期的后轮转角
 const TARGET_MEMORY_TIMEOUT: Duration = Duration::from_millis(200); // 超时则将目标改为停止
 const PAD_CONTROL_TIMEOUT: Duration = Duration::from_millis(200); // 在此保护时间内不进行控制
 const MESSAGE_RECEIVE_TIMEOUT: Duration = Duration::from_millis(200); // 超时认为底盘已断开，立即退出
