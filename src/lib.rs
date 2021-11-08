@@ -106,8 +106,12 @@ impl PM1 {
         &self.status
     }
 
+    pub fn set_target(&mut self, target: (Instant, Physical)) {
+        self.target = (target.0 + TARGET_MEMORY_TIMEOUT, target.1);
+    }
+
     pub fn drive(&mut self, target: Physical) {
-        self.send((Instant::now(), target));
+        self.set_target((Instant::now(), target))
     }
 
     #[cfg(feature = "predict")]
@@ -129,7 +133,6 @@ impl Driver for PM1 {
     type Key = PortKey;
     type Pacemaker = PM1Pacemaker;
     type Event = PM1Event;
-    type Command = (Instant, Physical);
 
     fn keys() -> Vec<Self::Key> {
         Port::list().into_iter().map(|id| id.key).collect()
@@ -175,10 +178,6 @@ impl Driver for PM1 {
             }
             Err(_) => None,
         }
-    }
-
-    fn send(&mut self, command: Self::Command) {
-        self.target = (command.0 + TARGET_MEMORY_TIMEOUT, command.1);
     }
 
     fn join<F>(&mut self, mut f: F) -> bool
