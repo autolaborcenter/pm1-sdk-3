@@ -1,4 +1,4 @@
-﻿use driver::{SupersivorEventForSingle::*, SupervisorForSingle};
+﻿use driver::{SupervisorEventForSingle::*, SupervisorForSingle};
 use pm1_control_model::Odometry;
 use pm1_sdk::{PM1Event, PM1};
 use std::{thread, time::Duration};
@@ -6,7 +6,7 @@ use std::{thread, time::Duration};
 fn main() {
     let mut odometry = Odometry::ZERO;
 
-    SupervisorForSingle::<PM1>::new().join(|e| {
+    SupervisorForSingle::<PM1>::default().join(|e| {
         match e {
             Connected(_, driver) => eprintln!("Connected: {}", driver.status()),
             ConnectFailed => {
