@@ -1,5 +1,5 @@
 use driver::{Driver, DriverPacemaker};
-use pm1_control_model::{ChassisModel, Motor, Odometry, Optimizer, Physical, Wheels};
+use pm1_control_model::{Motor, Odometry, Optimizer, Physical, Wheels};
 use serial_port::{Port, PortKey, SerialPort};
 use std::{
     collections::HashMap,
@@ -44,7 +44,7 @@ pub struct PM1 {
     target: (Instant, Physical),
 
     differential: Differential,
-    model: ChassisModel,
+    model: pm1_control_model::PM1,
     optimizer: Optimizer,
 }
 
@@ -296,7 +296,8 @@ impl PM1 {
             if wheels == ZERO {
                 None
             } else {
-                Some(PM1Event::Odometry(self.model.wheels_to_odometry(wheels)))
+                let v = self.model.wheels_to_velocity(wheels);
+                Some(PM1Event::Odometry(v * Duration::from_secs(1)))
             }
         } else {
             None

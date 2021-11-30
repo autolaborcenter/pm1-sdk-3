@@ -6,14 +6,7 @@ authors = ["YdrMaster <ydrml@hotmail.com>"]
 readme = "README.md"
 
 [dependencies]
+pm1-control-model = { path = "../pm1-control-model" }
 serial-port = { path = "../serial-port" }
-pm1-control-model = { path = "../pm1-control-model", default-features = false, features = [
-    "motor",
-    "odometry",
-] }
 driver = { path = "../driver" }
 lazy_static = "*"
-
-[features]
-default = ["predict"]
-predict = ["pm1-control-model/predict"]
