@@ -1,4 +1,5 @@
 use driver::{Driver, DriverPacemaker};
+use model::{Pm1Predictor, TrajectoryPredictor};
 use pm1_control_model::{Motor, Odometry, Optimizer, Physical, Wheels};
 use serial_port::{Port, PortKey, SerialPort};
 use std::{
@@ -114,13 +115,11 @@ impl PM1 {
         self.set_target((Instant::now(), target))
     }
 
-    #[cfg(feature = "predict")]
-    pub fn status_predictor(&self) -> model::StatusPredictor {
-        model::StatusPredictor::new(self.optimizer, CONTROL_PERIOD)
+    pub fn status_predictor(&self) -> Pm1Predictor {
+        Pm1Predictor::new(self.optimizer, CONTROL_PERIOD)
     }
 
-    #[cfg(feature = "predict")]
-    pub fn trajectory_predictor(&self) -> model::TrajectoryPredictor {
+    pub fn trajectory_predictor(&self) -> TrajectoryPredictor<model::PM1, Pm1Predictor> {
         model::TrajectoryPredictor {
             period: CONTROL_PERIOD,
             model: self.model.clone(),
