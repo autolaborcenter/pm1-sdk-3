@@ -1,5 +1,5 @@
 use driver::{Driver, DriverPacemaker};
-use model::{Pm1Predictor, TrajectoryPredictor};
+use model::{Pm1Model, Pm1Predictor, TrajectoryPredictor};
 use pm1_control_model::{Motor, Odometry, Optimizer, Physical, Wheels};
 use serial_port::{Port, PortKey, SerialPort};
 use std::{
@@ -45,7 +45,7 @@ pub struct PM1 {
     target: (Instant, Physical),
 
     differential: Differential,
-    model: pm1_control_model::PM1,
+    model: Pm1Model,
     optimizer: Optimizer,
 }
 
@@ -119,7 +119,7 @@ impl PM1 {
         Pm1Predictor::new(self.optimizer, CONTROL_PERIOD)
     }
 
-    pub fn trajectory_predictor(&self) -> TrajectoryPredictor<model::PM1, Pm1Predictor> {
+    pub fn trajectory_predictor(&self) -> TrajectoryPredictor<Pm1Predictor> {
         model::TrajectoryPredictor {
             period: CONTROL_PERIOD,
             model: self.model.clone(),
