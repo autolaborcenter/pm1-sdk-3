@@ -17,8 +17,8 @@ fn main() {
                 eprintln!("Disconnected.");
                 thread::sleep(Duration::from_secs(1));
             }
-            Event(_, Some((_, PM1Event::Odometry(delta)))) => {
-                odometry += delta;
+            Event(pm1, Some((_, PM1Event::Wheels(wheels)))) => {
+                odometry += pm1.model.wheels_to_velocity(wheels).to_odometry();
                 println!("{}", odometry);
             }
             Event(_, Some((_, e))) => println!("{:?}", e),

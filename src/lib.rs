@@ -1,6 +1,6 @@
 use driver::{Driver, DriverPacemaker};
 use model::{Pm1Model, Pm1Predictor, TrajectoryPredictor};
-use pm1_control_model::{Motor, Odometry, Optimizer, Physical, Wheels};
+use pm1_control_model::{Motor, Optimizer, Physical, Wheels};
 use serial_port::{Port, PortKey, SerialPort};
 use std::{
     collections::HashMap,
@@ -44,8 +44,8 @@ pub struct PM1 {
     status: PM1Status,
     target: (Instant, Physical),
 
+    pub model: Pm1Model,
     differential: Differential,
-    model: Pm1Model,
     optimizer: Optimizer,
 }
 
@@ -71,10 +71,11 @@ pub enum PM1Event {
     Battery(u8),
     PowerSwitch(bool),
     Physical(Physical),
-    Odometry(Odometry),
+    Wheels(Wheels),
 }
 
 impl DriverPacemaker for PM1Pacemaker {
+    #[inline]
     fn period() -> Duration {
         CONTROL_PERIOD
     }
@@ -103,22 +104,27 @@ impl DriverPacemaker for PM1Pacemaker {
 }
 
 impl PM1 {
+    #[inline]
     pub fn status<'a>(&'a self) -> &'a PM1Status {
         &self.status
     }
 
+    #[inline]
     pub fn set_target(&mut self, target: (Instant, Physical)) {
         self.target = (target.0 + TARGET_MEMORY_TIMEOUT, target.1);
     }
 
+    #[inline]
     pub fn drive(&mut self, target: Physical) {
         self.set_target((Instant::now(), target))
     }
 
+    #[inline]
     pub fn status_predictor(&self) -> Pm1Predictor {
         Pm1Predictor::new(self.optimizer, CONTROL_PERIOD)
     }
 
+    #[inline]
     pub fn trajectory_predictor(&self) -> TrajectoryPredictor<Pm1Predictor> {
         model::TrajectoryPredictor {
             period: CONTROL_PERIOD,
@@ -133,10 +139,12 @@ impl Driver for PM1 {
     type Pacemaker = PM1Pacemaker;
     type Event = PM1Event;
 
+    #[inline]
     fn keys() -> Vec<Self::Key> {
         Port::list().into_iter().map(|id| id.key).collect()
     }
 
+    #[inline]
     fn open_timeout() -> Duration {
         OPEN_TIMEOUT
     }
@@ -245,6 +253,7 @@ lazy_static::lazy_static! {
 }
 
 impl PM1Pacemaker {
+    #[inline]
     fn send_len(&self, len: usize) -> bool {
         if let Some(port) = self.port.upgrade() {
             if len > 0 {
@@ -258,11 +267,13 @@ impl PM1Pacemaker {
 }
 
 impl PM1 {
+    #[inline]
     fn detect_control_pad(&mut self, time: Instant) {
         self.using_pad = time;
         self.status.physical.speed = 0.0;
     }
 
+    #[inline]
     fn update_battery_percent(&mut self, battery_percent: u8) -> Option<PM1Event> {
         if battery_percent != self.status.battery_percent {
             self.status.battery_percent = battery_percent;
@@ -272,6 +283,7 @@ impl PM1 {
         }
     }
 
+    #[inline]
     fn update_power_switch(&mut self, power_switch: u8) -> Option<PM1Event> {
         let power_switch = power_switch != 0;
         if power_switch != self.status.power_switch {
@@ -295,8 +307,7 @@ impl PM1 {
             if wheels == ZERO {
                 None
             } else {
-                let v = self.model.wheels_to_velocity(wheels);
-                Some(PM1Event::Odometry(v * Duration::from_secs(1)))
+                Some(PM1Event::Wheels(wheels))
             }
         } else {
             None

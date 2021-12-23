@@ -15,6 +15,7 @@ impl Differential {
     // const R: u8 = 1;
     const N: u8 = 2;
 
+    #[inline]
     pub fn new() -> Self {
         Self {
             initialized: false,
