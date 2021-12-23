@@ -296,18 +296,13 @@ impl PM1 {
 
     fn update_odometry(&mut self, time: Instant, which: u8, value: i32) -> Option<PM1Event> {
         if let Some((dl, dr)) = self.differential.update(time, which, value) {
-            const ZERO: Wheels = Wheels {
-                left: 0.0,
-                right: 0.0,
-            };
-            let wheels = Wheels {
-                left: Motor::WHEEL.pluses_to_rad(dl),
-                right: Motor::WHEEL.pluses_to_rad(dr),
-            };
-            if wheels == ZERO {
+            if dl == 0 && dr == 0 {
                 None
             } else {
-                Some(PM1Event::Wheels(wheels))
+                Some(PM1Event::Wheels(Wheels {
+                    left: Motor::WHEEL.pluses_to_rad(dl),
+                    right: Motor::WHEEL.pluses_to_rad(dr),
+                }))
             }
         } else {
             None
