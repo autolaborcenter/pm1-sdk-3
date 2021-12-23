@@ -24,6 +24,7 @@ impl Header {
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn network(&self) -> u8 {
         self.0[1] >> 6
     }
@@ -34,6 +35,7 @@ impl Header {
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn proprity(&self) -> u8 {
         (self.0[1] & 0b11100) >> 2
     }
